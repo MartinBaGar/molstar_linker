@@ -1,0 +1,88 @@
+/* popup.css */
+
+:root {
+  --primary: #0969da;
+  --primary-hover: #0352ad;
+  --secondary: #f6f8fa;
+  --secondary-hover: #e1e4e8;
+  --text-main: #24292f;
+  --border: #d0d7de;
+  --card-bg: #ffffff;
+  --success: #2da44e;
+  --danger: #cf222e;
+}
+
+body {
+  width: 320px; /* Locked width for extension popups */
+  margin: 0;
+  padding: 16px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  color: var(--text-main);
+  background-color: var(--card-bg);
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.header h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.header .icon { font-size: 20px; }
+
+/* Form Controls */
+label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+
+select {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--secondary);
+  margin-bottom: 12px;
+  outline: none;
+  font-family: inherit;
+}
+select:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(9,105,218,0.2); }
+
+/* Buttons */
+button, .btn-upload {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  box-sizing: border-box;
+  transition: all 0.2s;
+  text-decoration: none;
+  font-family: inherit;
+}
+
+.primary { background-color: var(--primary); color: white; margin-bottom: 16px;}
+.primary:hover { background-color: var(--primary-hover); }
+
+.secondary { background-color: var(--secondary); color: var(--text-main); border-color: var(--border); margin-bottom: 8px;}
+.secondary:hover { background-color: var(--secondary-hover); }
+
+/* File Upload Hack */
+input[type="file"] { display: none; }
+
+#status {
+  display: block;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  min-height: 15px;
+  margin-bottom: 10px;
+  color: var(--success);
+}
+
+hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }

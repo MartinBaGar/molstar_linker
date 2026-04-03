@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mol* Linker Studio</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  
+  <div class="container">
+    
+    <div class="header-banner" style="display: flex; justify-content: space-between; align-items: center; padding: 24px; border-radius: 8px; margin-bottom: 24px; background-color: #f6f8fa; border: 1px solid #d0d7de;">
+      
+      <div style="display: flex; align-items: center; gap: 20px;">
+        <div style="font-size: 52px; line-height: 1; opacity: 0.9;">🎥 </div>
+        <div>
+          <h1 style="margin: 0 0 6px 0; font-size: 24px; color: #24292f;">
+            <a href="https://molstar.org/" target="_blank" style="color: #24292f";>Mol*</a>
+            Linker Studio 
+            <span style="font-size: 13px; font-weight: 500; color: #57606a; background: #e1e4e8; padding: 2px 8px; border-radius: 12px; vertical-align: middle; margin-left: 8px;">v2.0.0</span>
+          </h1>
+          <p style="margin: 0 0 8px 0; font-size: 14px; color: #24292f;">Advanced 
+          <a href="https://molstar.org/viewer-docs/extensions/mvs/" target="_blank" style="color: #24292f; font-weight: 500;">MolViewSpec</a> Template Manager</p>
+          <div style="font-size: 13px;">
+            <a href="https://github.com/MartinBaGar/molstar_linker" target="_blank" style="color: #24292f; text-decoration: none; margin-right: 16px; font-weight: 500;">⭐ GitHub</a>
+            <a href="https://github.com/MartinBaGar/molstar_linker/issues" target="_blank" style="color: #24292f; text-decoration: none; font-weight: 500;">🐞 Report Bug</a>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <a href="https://ko-fi.com/mabagar" target="_blank" style="display: inline-block; background-color: #FF5E5B; color: #ffffff; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: opacity 0.2s;">
+          ☕ Buy me a coffee
+        </a>
+      </div>
+
+    </div>
+
+    <div class="sidebar">
+      
+      <div class="panel" style="border-top: 4px solid var(--success);">
+        <h2>Active Settings</h2>
+        <p class="desc">Push the form settings to Mol* as your default active configuration across all repositories.</p>
+        <button id="save" class="primary">Apply to Mol*</button>
+        <span id="status"></span>
+      </div>
+
+      <div class="panel">
+        <h3>Template Library</h3>
+        <div class="setting-row">
+          <label>1. Load or Delete Template:</label>
+          <select id="template-select" style="margin-bottom: 12px;"></select>
+          <div class="flex-row">
+            <button id="load-template" class="secondary">Load</button>
+            <button id="delete-template" class="danger-outline">Delete</button>
+          </div>
+        </div>
+        <hr>
+        <div class="setting-row">
+          <label>2. Save Form as New Template:</label>
+          <input type="text" id="new-template-name" placeholder="e.g., Publication View" style="margin-bottom: 12px;">
+          <button id="save-template" class="secondary">Save Template</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Import / Export</h3>
+        <p class="desc" style="font-size: 13px; margin-bottom: 12px;">Share your settings with colleagues.</p>
+        <div class="flex-row">
+          <button id="export-json" class="secondary">⬇️ Export</button>
+          <div class="file-upload-wrapper">
+            <button class="secondary">⬆️ Import</button>
+            <input type="file" id="import-json" accept=".json">
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="main-content">
+      
+      <div class="panel">
+        <h2>Global Scene Settings</h2>
+        <p class="desc">Configure the background and camera perspective.</p>
+        <div id="scene-settings-container"></div>
+      </div>
+      
+      <div class="panel">
+        <h2>Global Target Configurations</h2>
+        <p class="desc">Define the baseline visual representation for standard molecular classes.</p>
+        <div id="settings-container"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Custom Highlighting Rules</h2>
+        <p class="desc">
+          Create dynamic rules to color specific chains, residues, or atomic selections. These rules supersede the global settings.
+        </p>
+        <div id="custom-rules-container"></div>
+        <button id="add-custom-rule">+ Add New Rule</button>
+      </div>
+    <div class="panel">
+        <h2>Managed Custom Domains</h2>
+        <p class="desc">
+          These are the private GitLab or institutional domains you have authorized. 
+          Removing a domain will stop the extension from running there.
+        </p>
+        
+        <div id="custom-domains-list" style="margin-top: 15px;">
+          <p style="color: #57606a; font-style: italic; font-size: 13px;">No custom domains authorized yet.</p>
+        </div>
+
+        <hr style="margin: 20px 0;">
+        
+        <div style="display: flex; gap: 10px;">
+          <input type="text" id="manual-domain-input" placeholder="e.g., gitlab.my-lab.org" style="flex-grow: 1;">
+          <button id="add-manual-domain" class="secondary" style="white-space: nowrap;">+ Add Domain</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="permissions.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
