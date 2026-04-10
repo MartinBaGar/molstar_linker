@@ -34,11 +34,14 @@ jobs:
           hugo-version: 'latest'
           extended: true
       - name: Build with Hugo
-        run: hugo --minify
+        # We explicitly tell Hugo to look in the ./docs folder
+        run: hugo --source ./docs --minify
+        
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./public
+          # We explicitly tell GitHub where the generated HTML lives
+          path: ./docs/public
 
   deploy:
     environment:
