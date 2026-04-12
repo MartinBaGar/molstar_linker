@@ -1,4 +1,0 @@
-#+title: Getting Started
-#+date: 2025-01-01
-#+draft: false
-#+weight: 10
