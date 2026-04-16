@@ -1,11 +1,5 @@
 // content.js
 
-const StorageAPI = {
-  core: typeof globalThis.browser !== 'undefined' ? globalThis.browser : chrome,
-  get: function(keys, callback) { this.core.storage.sync.get(keys, callback); },
-  set: function(data, callback) { this.core.storage.sync.set(data, callback); }
-};
-
 const SUPPORTED_EXT = new Set(['.pdb','.cif','.mmcif','.gro','.mol','.mol2','.sdf','.xyz','.ent','.bcif']);
 
 const GITLAB_PATTERNS = [
@@ -24,56 +18,60 @@ function extractExtension(urlStr) {
   return null;
 }
 
-// UPDATE: Now it just returns { rawUrl, formatStr } instead of building the MVS JSON
 function getStructureInfo(href) {
-  const ext = extractExtension(href);
-  if (!ext) return null;
-  
-  // Mol* uses 'mmcif' for .cif files
-  const formatStr = ext === '.cif' ? 'mmcif' : ext.slice(1);
-
   let parsedUrl;
-  try {
-    parsedUrl = new URL(href, window.location.origin);
-  } catch (e) {
-    return null; 
-  }
-  const urlStr = parsedUrl.href;
+  try { parsedUrl = new URL(href, window.location.origin); } 
+  catch (e) { return null; }
 
-  if (urlStr.includes('github.com')) {
+  // FIX 2a: Instantly reject anchor jump links (e.g., #content-body, #L1)
+  if (parsedUrl.hash) return null;
+
+  const extWithQuery = extractExtension(parsedUrl.href);
+  if (!extWithQuery) return null;
+  const formatStr = extWithQuery === '.cif' ? 'mmcif' : extWithQuery.slice(1);
+
+  const cleanUrl = parsedUrl.origin + parsedUrl.pathname;
+
+  // FIX 2b: Explicitly block Git interface paths that are not valid raw files
+  const blockedGitPaths = ['/blame/', '/commits/', '/commit/', '/edit/', '/tree/', '/network/', '/compare/'];
+  if (blockedGitPaths.some(p => cleanUrl.includes(p))) return null;
+
+  if (cleanUrl.includes('github.com')) {
     let rawUrl = null;
-    if (urlStr.includes('/blob/')) {
-      rawUrl = urlStr.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
-    } else if (urlStr.includes('/raw/refs/heads/')) {
-      rawUrl = urlStr.replace('github.com', 'raw.githubusercontent.com').replace('/raw/refs/heads/', '/');
+    if (cleanUrl.includes('/blob/')) {
+      rawUrl = cleanUrl.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+    } else if (cleanUrl.includes('/raw/refs/heads/')) {
+      rawUrl = cleanUrl.replace('github.com', 'raw.githubusercontent.com').replace('/raw/refs/heads/', '/');
     }
     if (rawUrl) return { rawUrl, formatStr };
   }
 
   for (const p of GITLAB_PATTERNS) {
-    const match = urlStr.match(p.regex);
+    const match = cleanUrl.match(p.regex); 
     if (!match) continue;
     const rawUrl = p.buildApiUrl(match[1], match[2], match[3], match[4]);
     return { rawUrl, formatStr };
   }
 
-  // Universal Fallback
-  return { rawUrl: urlStr, formatStr };
+  return { rawUrl: parsedUrl.href, formatStr };
 }
 
-// UPDATE: Takes the rawUrl and formatStr directly
-function makeBadge(rawUrl, formatStr) {
-  const badge = document.createElement('a');
+function makeBadge(rawUrl, formatStr, originalHref) {
+  const badge = document.createElement('button');
+  badge.type = 'button';
   badge.textContent = 'Mol* (Workspace)';
-  badge.href = "#"; 
   badge.setAttribute('data-ms-badge', 'true');
+  badge.setAttribute('data-original-href', originalHref);
   
-  // THE FIX: Use chrome.runtime directly
-  badge.onclick = (e) => {
+  // FIX 1: Aggressively block all mouse events so GitLab's framework 
+  // doesn't trigger row navigation when we click the button
+  const blockEvent = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    // Call the global chrome API directly instead of StorageAPI.core
+  };
+
+  const triggerWorkspace = (e) => {
+    blockEvent(e);
     chrome.runtime.sendMessage({
       action: "open_viewer",
       url: rawUrl,
@@ -81,41 +79,60 @@ function makeBadge(rawUrl, formatStr) {
     });
   };
   
+  badge.addEventListener('click', triggerWorkspace);
+  badge.addEventListener('mousedown', blockEvent);
+  badge.addEventListener('mouseup', blockEvent);
+  
   Object.assign(badge.style, {
-    marginLeft: '6px',
-    fontSize: '10px',
+    marginLeft: '6px', fontSize: '10px', border: 'none',
     backgroundColor: rawUrl.includes('gitlab') ? '#6a1b9a' : '#2da44e',
-    color: 'white',
-    padding: '1px 5px',
-    borderRadius: '3px',
-    textDecoration: 'none',
-    fontWeight: 'bold',
-    display: 'inline-block',
-    verticalAlign: 'middle',
-    cursor: 'pointer' 
+    color: 'white', padding: '2px 6px', borderRadius: '3px',
+    textDecoration: 'none', fontWeight: 'bold', display: 'inline-block',
+    verticalAlign: 'middle', cursor: 'pointer', lineHeight: 'normal'
   });
+  
   return badge;
 }
 
 function injectMolstarLinker() {
+  observer.disconnect();
+  
   try {
-    document.querySelectorAll('a[href]').forEach(a => {
-      if (a.getAttribute('data-ms-processed') === a.href) return;
+    document.querySelectorAll('a[href]:not([data-ms-badge])').forEach(a => {
+      if (a.dataset.msProcessed === 'true') return;
       
-      const structureInfo = getStructureInfo(a.href);
-      if (!structureInfo) return;
-      
-      a.setAttribute('data-ms-processed', a.href);
-      
-      if (a.nextElementSibling && a.nextElementSibling.hasAttribute('data-ms-badge')) {
+      const text = a.textContent.trim();
+      if (!text || /^\d+$/.test(text)) {
+        a.dataset.msProcessed = 'true';
         return;
       }
+      
+      const structureInfo = getStructureInfo(a.href);
+      if (!structureInfo) {
+        a.dataset.msProcessed = 'true';
+        return;
+      }
+      
+      const parent = a.parentNode;
+      if (parent) {
+        const existingBadge = Array.from(parent.children).find(
+          node => node.getAttribute('data-ms-badge') === 'true' && 
+                  node.getAttribute('data-original-href') === a.href
+        );
+        if (existingBadge) {
+          a.dataset.msProcessed = 'true';
+          return;
+        }
+      }
 
-      a.insertAdjacentElement('afterend', makeBadge(structureInfo.rawUrl, structureInfo.formatStr));
+      a.dataset.msProcessed = 'true';
+      a.insertAdjacentElement('afterend', makeBadge(structureInfo.rawUrl, structureInfo.formatStr, a.href));
     });
   } catch (e) { 
-    console.warn("Linker Error:", e); 
+    console.warn("Mol* Linker Error:", e); 
   }
+  
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 let debounceTimer = null;

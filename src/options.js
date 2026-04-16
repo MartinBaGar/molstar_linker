@@ -382,30 +382,35 @@ document.getElementById('import-json').onchange = (e) => {
 document.getElementById('save').onclick = () => StorageAPI.set(extractCurrentSettings(), () => showStatus('Applied!'));
 
 // --- 5. DOMAIN MANAGEMENT ---
-async function refreshCustomDomainList() {
+function refreshCustomDomainList() {
   const container = document.getElementById('custom-domains-list');
   if (!container) return;
-  const data = await chrome.storage.sync.get({ customDomains: [] });
-  if (data.customDomains.length === 0) {
-    container.innerHTML = `<p style="color: #57606a; font-style: italic; font-size: 13px;">No custom domains authorized yet.</p>`;
-    return;
-  }
-  container.innerHTML = '';
-  data.customDomains.forEach(domain => {
-    const row = document.createElement('div');
-    row.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: 8px;";
-    row.innerHTML = `<div style="display: flex; align-items: center; gap: 10px;"><span>🌐</span><span style="font-weight: 500;">${domain}</span></div>
-                     <button class="danger-outline remove-domain-btn" data-domain="${domain}" style="padding: 4px 10px; font-size: 12px;">Remove</button>`;
-    container.appendChild(row);
-  });
-  document.querySelectorAll('.remove-domain-btn').forEach(btn => {
-    btn.onclick = async (e) => {
-      const dom = e.target.getAttribute('data-domain');
-      if (confirm(`Revoke access for ${dom}?`)) {
-        await PermissionsManager.revokeAndUnregister(dom);
-        refreshCustomDomainList();
-      }
-    };
+  
+  // Use your callback wrapper instead of 'await chrome...' to support Firefox MV2
+  StorageAPI.get({ customDomains: [] }, (data) => {
+    if (!data || data.customDomains.length === 0) {
+      container.innerHTML = `<p style="color: #57606a; font-style: italic; font-size: 13px;">No custom domains authorized yet.</p>`;
+      return;
+    }
+    
+    container.innerHTML = '';
+    data.customDomains.forEach(domain => {
+      const row = document.createElement('div');
+      row.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: 8px;";
+      row.innerHTML = `<div style="display: flex; align-items: center; gap: 10px;"><span>🌐</span><span style="font-weight: 500;">${domain}</span></div>
+                       <button class="danger-outline remove-domain-btn" data-domain="${domain}" style="padding: 4px 10px; font-size: 12px;">Remove</button>`;
+      container.appendChild(row);
+    });
+    
+    document.querySelectorAll('.remove-domain-btn').forEach(btn => {
+      btn.onclick = async (e) => {
+        const dom = e.target.getAttribute('data-domain');
+        if (confirm(`Revoke access for ${dom}?`)) {
+          await PermissionsManager.revokeAndUnregister(dom);
+          refreshCustomDomainList();
+        }
+      };
+    });
   });
 }
 

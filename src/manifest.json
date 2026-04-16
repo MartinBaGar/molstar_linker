@@ -33,8 +33,7 @@
     "open_in_tab": true
   },
   "background": {
-    "service_worker": "background.js",
-    "scripts": ["background.js"]
+    "service_worker": "background.js"
   },
   "sandbox": {
     "pages": ["sandbox.html"]
@@ -50,21 +49,8 @@
         "*://*.rcsb.org/*",
         "*://*.alphafold.ebi.ac.uk/*"
       ],
-      "js": [
-        "config.js",
-        "mvs-builder.js",
-        "content.js"
-      ],
+      "js": ["content.js"],
       "run_at": "document_end"
     }
-  ],
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "molstar-linker@me.fr",
-      "strict_min_version": "128.0",
-      "data_collection_permissions": {
-        "required": ["none"]
-      }
-    }
-  }
+  ]
 }
