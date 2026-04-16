@@ -62,6 +62,7 @@ This project is licensed under the MIT License.
 - [ ] Add example files
 - [ ] Add link to wiki in the popup and studio page
 - [ ] Add Chrome link when published
+- [ ] Add for RCSB files from the drop down menu, there as currently not detected.
 
 # Enhancement 
 - Add possibility to open local file using in Mol* Linnker and its presets

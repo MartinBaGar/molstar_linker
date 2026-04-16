@@ -7,7 +7,6 @@ const StorageAPI = {
 };
 
 const SUPPORTED_EXT = new Set(['.pdb','.cif','.mmcif','.gro','.mol','.mol2','.sdf','.xyz','.ent','.bcif']);
-const SKIP_TAGS = new Set(['SCRIPT','STYLE','CODE','PRE','TEXTAREA','INPUT']);
 
 const GITLAB_PATTERNS = [
   {
@@ -17,29 +16,51 @@ const GITLAB_PATTERNS = [
   }
 ];
 
-function getMolstarUrl(href, settings) {
-  const url = href.split('?')[0];
-  const ext = '.' + url.split('.').pop().toLowerCase();
-  if (!SUPPORTED_EXT.has(ext)) return null;
-  const formatStr = ext.slice(1); 
+// Helper to intelligently find an extension even if hidden in query parameters (e.g. ?f=file.gro&name=...)
+function extractExtension(urlStr) {
+  for (let ext of SUPPORTED_EXT) {
+    // Matches the extension followed by a ?, #, &, or the end of the string
+    const regex = new RegExp(`\\${ext}(?:[?#&]|$)`, 'i');
+    if (regex.test(urlStr)) return ext;
+  }
+  return null;
+}
 
-  if (url.includes('github.com')) {
+function getMolstarUrl(href, settings) {
+  const ext = extractExtension(href);
+  if (!ext) return null;
+  const formatStr = ext.slice(1);
+
+  // Parse the URL to ensure we handle it safely as an absolute link
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(href, window.location.origin);
+  } catch (e) {
+    return null; 
+  }
+  const urlStr = parsedUrl.href;
+
+  // 1. Handle GitHub URLs
+  if (urlStr.includes('github.com')) {
     let rawUrl = null;
-    if (url.includes('/blob/')) {
-      rawUrl = url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
-    } else if (url.includes('/raw/refs/heads/')) {
-      rawUrl = url.replace('github.com', 'raw.githubusercontent.com').replace('/raw/refs/heads/', '/');
+    if (urlStr.includes('/blob/')) {
+      rawUrl = urlStr.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+    } else if (urlStr.includes('/raw/refs/heads/')) {
+      rawUrl = urlStr.replace('github.com', 'raw.githubusercontent.com').replace('/raw/refs/heads/', '/');
     }
     if (rawUrl) return MvsBuilder.createViewerUrl(rawUrl, formatStr, settings);
   }
 
+  // 2. Handle GitLab URLs
   for (const p of GITLAB_PATTERNS) {
-    const match = url.match(p.regex);
+    const match = urlStr.match(p.regex);
     if (!match) continue;
     const rawUrl = p.buildApiUrl(match[1], match[2], match[3], match[4]);
     return MvsBuilder.createViewerUrl(rawUrl, formatStr, settings);
   }
-  return null;
+
+  // 3. Universal Fallback (for RCSB, ElabFTW, and Custom Domains)
+  return MvsBuilder.createViewerUrl(urlStr, formatStr, settings);
 }
 
 function makeBadge(molstarUrl) {
@@ -68,76 +89,27 @@ function makeBadge(molstarUrl) {
 function injectMolstarLinker() {
   StorageAPI.get(AppConfig.getDefaults(), (settings) => {
     try {
-      const map = {};
-      
-      // 1. Find structure links
       document.querySelectorAll('a[href]').forEach(a => {
-        // SPA FIX: Store the actual URL we processed. If GitLab changes the URL on this element, we will process it again!
+        // SPA FIX: Store the actual URL we processed to avoid infinite loops.
         if (a.getAttribute('data-ms-processed') === a.href) return;
         
         const molstarUrl = getMolstarUrl(a.href, settings);
         if (!molstarUrl) return;
         
-        const filename = a.href.split('?')[0].split('/').pop();
-        if (filename) {
-          map[filename] = molstarUrl;
-          a.setAttribute('data-ms-processed', a.href);
-        }
-      });
-      
-      if (Object.keys(map).length === 0) return;
-      
-      const pattern = new RegExp(`(${Object.keys(map).map(f => f.replace(/\./g, '\\.')).join('|')})`, 'g');
-
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-        acceptNode(node) {
-          if (SKIP_TAGS.has(node.parentElement?.tagName)) return NodeFilter.FILTER_REJECT;
-          if (node.parentElement?.hasAttribute('data-ms-badge')) return NodeFilter.FILTER_REJECT;
-          pattern.lastIndex = 0;
-          return pattern.test(node.textContent) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
-        }
-      });
-
-      const hits = [];
-      let node;
-      while ((node = walker.nextNode())) hits.push(node);
-
-      hits.forEach(textNode => {
-        pattern.lastIndex = 0;
-        const match = pattern.exec(textNode.textContent);
-        if (!match) return;
-
-        const molstarUrl = map[match[1]];
-        if (!molstarUrl) return;
-
-        const parent = textNode.parentElement;
-        if (!parent) return;
-
-        // SPA FIX: Don't rely on data-tags. Just check if our badge is already physically there.
-        if (['SPAN', 'H1', 'H2'].includes(parent.tagName)) {
-          if (!parent.querySelector('[data-ms-badge]')) {
-            parent.appendChild(makeBadge(molstarUrl));
-          }
+        // Mark the link as processed
+        a.setAttribute('data-ms-processed', a.href);
+        
+        // Prevent stacking badges if one is already physically right next to this element
+        if (a.nextElementSibling && a.nextElementSibling.hasAttribute('data-ms-badge')) {
           return;
         }
 
-        let insertAfter = parent;
-        while (insertAfter) {
-          const p = insertAfter.parentElement;
-          if (!p) break;
-          const pClass = p.className || '';
-          if (pClass.includes('filename') || pClass.includes('tree-item') || p.tagName === 'TD' || p.tagName === 'LI') break;
-          insertAfter = p;
-        }
-
-        // SPA FIX: Check if the very next element is our badge
-        if (insertAfter.nextElementSibling && insertAfter.nextElementSibling.hasAttribute('data-ms-badge')) {
-          return;
-        }
-
-        insertAfter.insertAdjacentElement('afterend', makeBadge(molstarUrl));
+        // Direct DOM Injection: Place the badge immediately after the <a> tag
+        a.insertAdjacentElement('afterend', makeBadge(molstarUrl));
       });
-    } catch (e) { console.warn("Linker Error:", e); }
+    } catch (e) { 
+      console.warn("Linker Error:", e); 
+    }
   });
 }
 
