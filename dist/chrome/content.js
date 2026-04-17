@@ -71,7 +71,6 @@ function getStructureInfo(href, linkElement) {
   }
 
   if (!extWithQuery) return null; // If it failed all 3 rings, it's not a structure file
-  
   const formatStr = extWithQuery === '.cif' ? 'mmcif' : extWithQuery.slice(1);
   const cleanUrl = parsedUrl.origin + parsedUrl.pathname; 
 

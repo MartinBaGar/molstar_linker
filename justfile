@@ -65,7 +65,6 @@ publish version:
 	
 	# Step D: Build the clean folders and zip files
 	just zip {{version}}
-	just build-site
 	
 	# Step E: Upload BOTH browser versions to the GitHub release page
 	echo "Creating GitHub Release..."
