@@ -9,7 +9,7 @@ https://github.com/alex-shpak/hugo-book
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="Once the extension is installed, no configuration is needed to get started.
-See Your First Structure# Navigate to any GitHub or GitLab repository that contains a .pdb, .cif, or other supported file Look for a green Mol (MVS)* badge next to file names in the file browser, or next to links in README files Click the badge — the structure opens in the Mol* viewer in a new tab, rendered with your current settings Change the Active Preset# Click the extension icon in your browser toolbar to open the popup:
+See Your First Structure# Navigate to any GitHub or GitLab repository that contains a .pdb, .cif, or other supported file Look for a green Mol (MVS)* badge next to file names in the file browser, or next to links in README files Click the badge — the structure opens in the Mol* viewer in a new tab, rendered with your current settings View Local Files (Drag &amp; Drop)# Mol* Linker doubles as a lightning-fast offline desktop viewer! If you have a structure on your computer (e.g., from AlphaFold or PyMOL):
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2e3440">
@@ -17,7 +17,7 @@ See Your First Structure# Navigate to any GitHub or GitLab repository that conta
   <meta property="og:site_name" content="Mol* Linker Wiki">
   <meta property="og:title" content="Quickstart">
   <meta property="og:description" content="Once the extension is installed, no configuration is needed to get started.
-See Your First Structure# Navigate to any GitHub or GitLab repository that contains a .pdb, .cif, or other supported file Look for a green Mol (MVS)* badge next to file names in the file browser, or next to links in README files Click the badge — the structure opens in the Mol* viewer in a new tab, rendered with your current settings Change the Active Preset# Click the extension icon in your browser toolbar to open the popup:">
+See Your First Structure# Navigate to any GitHub or GitLab repository that contains a .pdb, .cif, or other supported file Look for a green Mol (MVS)* badge next to file names in the file browser, or next to links in README files Click the badge — the structure opens in the Mol* viewer in a new tab, rendered with your current settings View Local Files (Drag &amp; Drop)# Mol* Linker doubles as a lightning-fast offline desktop viewer! If you have a structure on your computer (e.g., from AlphaFold or PyMOL):">
   <meta property="og:locale" content="en_us">
   <meta property="og:type" content="article">
     <meta property="article:section" content="docs">
@@ -25,8 +25,8 @@ See Your First Structure# Navigate to any GitHub or GitLab repository that conta
 
   <meta itemprop="name" content="Quickstart">
   <meta itemprop="description" content="Once the extension is installed, no configuration is needed to get started.
-See Your First Structure# Navigate to any GitHub or GitLab repository that contains a .pdb, .cif, or other supported file Look for a green Mol (MVS)* badge next to file names in the file browser, or next to links in README files Click the badge — the structure opens in the Mol* viewer in a new tab, rendered with your current settings Change the Active Preset# Click the extension icon in your browser toolbar to open the popup:">
-  <meta itemprop="wordCount" content="158">
+See Your First Structure# Navigate to any GitHub or GitLab repository that contains a .pdb, .cif, or other supported file Look for a green Mol (MVS)* badge next to file names in the file browser, or next to links in README files Click the badge — the structure opens in the Mol* viewer in a new tab, rendered with your current settings View Local Files (Drag &amp; Drop)# Mol* Linker doubles as a lightning-fast offline desktop viewer! If you have a structure on your computer (e.g., from AlphaFold or PyMOL):">
+  <meta itemprop="wordCount" content="366">
 
 <title>Quickstart | Mol* Linker Wiki</title>
 <link rel="icon" href="/Molstar_Linker/favicon.png" >
@@ -36,7 +36,7 @@ See Your First Structure# Navigate to any GitHub or GitLab repository that conta
 
 
   <script defer src="/Molstar_Linker/fuse.min.js"></script>
-  <script defer src="/Molstar_Linker/en.search.min.9739a2f0b535cce9402d0496f91d1588f9293d5495c7836d957ed4d02176ea10.js" integrity="sha256-lzmi8LU1zOlALQSW&#43;R0ViPkpPVSVx4NtlX7U0CF26hA=" crossorigin="anonymous"></script>
+  <script defer src="/Molstar_Linker/en.search.min.fbf53c68391b00f2c9f679680ca0e5446bde4d57d2d22ac87cebb9035e2600c1.js" integrity="sha256-&#43;/U8aDkbAPLJ9nloDKDlRGveTVfS0irIfOu5A14mAME=" crossorigin="anonymous"></script>
 
 
 
@@ -369,8 +369,14 @@ See Your First Structure# Navigate to any GitHub or GitLab repository that conta
 <nav id="TableOfContents">
   <ul>
     <li><a href="#see-your-first-structure">See Your First Structure</a></li>
+    <li><a href="#view-local-files--drag-and-drop">View Local Files (Drag &amp; Drop)</a></li>
     <li><a href="#change-the-active-preset">Change the Active Preset</a></li>
     <li><a href="#open-the-full-settings-studio">Open the Full Settings Studio</a></li>
+    <li><a href="#working-with-unknown-databases">Working with Unknown Databases</a>
+      <ul>
+        <li><a href="#the-right-click-fallback-and-gatekeeper">The Right-Click Fallback &amp; Gatekeeper</a></li>
+      </ul>
+    </li>
   </ul>
 </nav>
 
@@ -390,6 +396,13 @@ See Your First Structure# Navigate to any GitHub or GitLab repository that conta
 <li>Look for a green <strong>Mol</strong> (MVS)* badge next to file names in the file browser, or next to links in README files</li>
 <li>Click the badge — the structure opens in the Mol* viewer in a new tab, rendered with your current settings</li>
 </ol>
+<h2 id="view-local-files--drag-and-drop">View Local Files (Drag &amp; Drop)<a class="anchor" href="#view-local-files--drag-and-drop">#</a></h2>
+<p>Mol* Linker doubles as a lightning-fast offline desktop viewer! If you have a structure on your computer (e.g., from AlphaFold or PyMOL):</p>
+<ol>
+<li>Click the Mol* Linker extension icon in your browser toolbar.</li>
+<li><strong><strong>Drag and Drop</strong></strong> your local `.pdb`, `.cif`, or `.gro` file directly into the dashed box.</li>
+<li>The workspace will instantly open and render your file locally—no upload required!</li>
+</ol>
 <h2 id="change-the-active-preset">Change the Active Preset<a class="anchor" href="#change-the-active-preset">#</a></h2>
 <p>Click the extension icon in your browser toolbar to open the popup:</p>
 <ol>
@@ -399,6 +412,16 @@ See Your First Structure# Navigate to any GitHub or GitLab repository that conta
 </ol>
 <h2 id="open-the-full-settings-studio">Open the Full Settings Studio<a class="anchor" href="#open-the-full-settings-studio">#</a></h2>
 <p>Click <strong>Open Advanced Studio</strong> in the popup, or right-click the extension icon and choose <strong>Options</strong>. The studio lets you configure representations, colors, custom highlight rules, and templates in detail — see <a href="../configuration">Configuration</a>.</p>
+<h2 id="working-with-unknown-databases">Working with Unknown Databases<a class="anchor" href="#working-with-unknown-databases">#</a></h2>
+<p>Mol* Linker is equipped with a Universal &ldquo;Smart Scanner&rdquo; that can automatically detect structural files on almost any database (like Figshare, Zenodo, or university servers). If the extension detects a valid structure nearby, the Mol* Workspace badge will appear automatically.</p>
+<h3 id="the-right-click-fallback-and-gatekeeper">The Right-Click Fallback &amp; Gatekeeper<a class="anchor" href="#the-right-click-fallback-and-gatekeeper">#</a></h3>
+<p>If you are on a highly customized database (like Figshare or Zenodo) where the green badge does not automatically appear next to a download link:</p>
+<ol>
+<li><strong><strong>Right-Click</strong></strong> the download button or link.</li>
+<li>Select <strong>*&ldquo;Open in Mol</strong> Workspace&rdquo;** from the browser&rsquo;s context menu.</li>
+<li><strong><strong>The Gatekeeper:</strong></strong> If the site is not yet authorized, the extension will securely intercept the request and ask if you want to grant it access.</li>
+<li><strong><strong>Format Check:</strong></strong> If the extension cannot guess the file type from the website&rsquo;s code, it will present a clean dropdown asking you to confirm the format before launching.</li>
+</ol>
 </article>
  
       
@@ -477,8 +500,14 @@ See Your First Structure# Navigate to any GitHub or GitLab repository that conta
 <nav id="TableOfContents">
   <ul>
     <li><a href="#see-your-first-structure">See Your First Structure</a></li>
+    <li><a href="#view-local-files--drag-and-drop">View Local Files (Drag &amp; Drop)</a></li>
     <li><a href="#change-the-active-preset">Change the Active Preset</a></li>
     <li><a href="#open-the-full-settings-studio">Open the Full Settings Studio</a></li>
+    <li><a href="#working-with-unknown-databases">Working with Unknown Databases</a>
+      <ul>
+        <li><a href="#the-right-click-fallback-and-gatekeeper">The Right-Click Fallback &amp; Gatekeeper</a></li>
+      </ul>
+    </li>
   </ul>
 </nav>
 

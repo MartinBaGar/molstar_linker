@@ -26,7 +26,7 @@ When you click a badge, the extension securely downloads the file straight into 
   <meta itemprop="name" content="Frequently Asked Questions">
   <meta itemprop="description" content="General Questions# Where did my data go? Does this extension upload my proprietary files?# Absolutely not. This is one of the biggest upgrades in Mol* Linker v2.0. Older versions of this tool (and many other visualizers) had to redirect you to external servers. Mol* Linker now opens a dedicated, local workspace directly inside your browser.
 When you click a badge, the extension securely downloads the file straight into your browser’s active, temporary memory (RAM). It never touches your hard drive, and it is never uploaded or sent to any external visualization servers. The moment you close the tab, the data ceases to exist. It is 100% private.">
-  <meta itemprop="wordCount" content="464">
+  <meta itemprop="wordCount" content="823">
 
 <title>Frequently Asked Questions | Mol* Linker Wiki</title>
 <link rel="icon" href="/Molstar_Linker/favicon.png" >
@@ -36,7 +36,7 @@ When you click a badge, the extension securely downloads the file straight into 
 
 
   <script defer src="/Molstar_Linker/fuse.min.js"></script>
-  <script defer src="/Molstar_Linker/en.search.min.9739a2f0b535cce9402d0496f91d1588f9293d5495c7836d957ed4d02176ea10.js" integrity="sha256-lzmi8LU1zOlALQSW&#43;R0ViPkpPVSVx4NtlX7U0CF26hA=" crossorigin="anonymous"></script>
+  <script defer src="/Molstar_Linker/en.search.min.fbf53c68391b00f2c9f679680ca0e5446bde4d57d2d22ac87cebb9035e2600c1.js" integrity="sha256-&#43;/U8aDkbAPLJ9nloDKDlRGveTVfS0irIfOu5A14mAME=" crossorigin="anonymous"></script>
 
 
 
@@ -375,6 +375,11 @@ When you click a badge, the extension securely downloads the file straight into 
         <li><a href="#why-did-my-browser-show-an-extension-context-invalidated-error">Why did my browser show an &ldquo;Extension Context Invalidated&rdquo; error?</a></li>
         <li><a href="#why-do-my-molecules-appear-blank-when-the-workspace-first-loads">Why do my molecules appear blank when the workspace first loads?</a></li>
         <li><a href="#why-did-my-massive-molecule--or-md-trajectory--fail-to-load">Why did my massive molecule (or MD trajectory) fail to load?</a></li>
+        <li><a href="#why-did-the-badge-not-appear-next-to-my-download-link">Why did the badge not appear next to my download link?</a></li>
+        <li><a href="#why-did-the-extension-prompt-me-to-select-a-format">Why did the extension prompt me to select a format?</a></li>
+        <li><a href="#can-i-view-local-files-from-my-computer">Can I view local files from my computer?</a></li>
+        <li><a href="#why-did-i-get-a-download-blocked-or-xml-error-on-figshare-zenodo">Why did I get a &ldquo;Download Blocked&rdquo; or XML error on Figshare/Zenodo?</a></li>
+        <li><a href="#why-did-the-extension-prompt-me-to-select-a-format">Why did the extension prompt me to select a format?</a></li>
       </ul>
     </li>
   </ul>
@@ -407,6 +412,17 @@ Older versions of this tool (and many other visualizers) had to redirect you to 
 <p>Mol* Linker is engineered with strict security and memory safeguards. Because the extension downloads the structural file directly into your browser&rsquo;s active RAM (to ensure your data is never uploaded to a third-party server), there is a hard-coded file size limit of <strong>25 Megabytes</strong>.</p>
 <p>If you attempt to open an incredibly massive viral capsid <code>.cif</code> file or a multi-frame molecular dynamics <code>.gro</code> trajectory that exceeds 25 MB, the extension will intentionally block the download to prevent your web browser from freezing or crashing.</p>
 <p>For files larger than 25 MB, we recommend downloading the file to your computer manually and opening it in the desktop version of Mol* or PyMOL.</p>
+<h3 id="why-did-the-badge-not-appear-next-to-my-download-link">Why did the badge not appear next to my download link?<a class="anchor" href="#why-did-the-badge-not-appear-next-to-my-download-link">#</a></h3>
+<p>Mol* Linker&rsquo;s Smart Scanner looks at the URL, the HTML attributes, and the surrounding text to find a valid extension (like <code>.pdb</code> or <code>.cif</code>). If a database completely hides this information (e.g., a button that just says &ldquo;Download File&rdquo; with an opaque URL like <code>/file/1234</code>), the scanner will ignore it to avoid injecting badges onto standard PDFs or images.
+<strong>Solution:</strong> Simply Right-Click the download link and select &ldquo;Open in Mol* Workspace&rdquo;.</p>
+<h3 id="why-did-the-extension-prompt-me-to-select-a-format">Why did the extension prompt me to select a format?<a class="anchor" href="#why-did-the-extension-prompt-me-to-select-a-format">#</a></h3>
+<p>When you use the Right-Click menu on an opaque link (a link that does not explicitly end in <code>.pdb</code>, <code>.cif</code>, etc.), the extension securely passes the file to the viewer but flags the format as &ldquo;unknown&rdquo;. To prevent the Mol* engine from crashing while trying to parse a PDB as a Gromacs trajectory, it safely pauses and asks you to confirm the format before rendering.</p>
+<h3 id="can-i-view-local-files-from-my-computer">Can I view local files from my computer?<a class="anchor" href="#can-i-view-local-files-from-my-computer">#</a></h3>
+<p>Yes! Click the extension icon to open the popup, and simply Drag and Drop your local structural file into the dashed box. You can also drag and drop files directly into an already open Mol* Workspace tab! The file is read locally and is never uploaded to the internet.</p>
+<h3 id="why-did-i-get-a-download-blocked-or-xml-error-on-figshare-zenodo">Why did I get a &ldquo;Download Blocked&rdquo; or XML error on Figshare/Zenodo?<a class="anchor" href="#why-did-i-get-a-download-blocked-or-xml-error-on-figshare-zenodo">#</a></h3>
+<p>Browsers with strict privacy settings (especially Firefox) block &ldquo;cross-origin redirects,&rdquo; which is how sites like Figshare route files to Amazon AWS servers. Mol* Linker detects this block to prevent the 3D engine from crashing. To fix it, simply add the site to your Authorized Custom Domains in the Advanced Studio to grant the extension a secure bypass pass.</p>
+<h3 id="why-did-the-extension-prompt-me-to-select-a-format">Why did the extension prompt me to select a format?<a class="anchor" href="#why-did-the-extension-prompt-me-to-select-a-format">#</a></h3>
+<p>When you use the Right-Click menu on an opaque link (a link that does not explicitly end in <code>.pdb</code>, <code>.cif</code>, etc.), the extension securely passes the file to the viewer but flags the format as &ldquo;unknown&rdquo;. To prevent the Mol* engine from crashing while trying to parse a PDB as a Gromacs trajectory, it safely pauses and asks you to confirm the format before rendering.</p>
 </article>
  
       
@@ -486,6 +502,11 @@ Older versions of this tool (and many other visualizers) had to redirect you to 
         <li><a href="#why-did-my-browser-show-an-extension-context-invalidated-error">Why did my browser show an &ldquo;Extension Context Invalidated&rdquo; error?</a></li>
         <li><a href="#why-do-my-molecules-appear-blank-when-the-workspace-first-loads">Why do my molecules appear blank when the workspace first loads?</a></li>
         <li><a href="#why-did-my-massive-molecule--or-md-trajectory--fail-to-load">Why did my massive molecule (or MD trajectory) fail to load?</a></li>
+        <li><a href="#why-did-the-badge-not-appear-next-to-my-download-link">Why did the badge not appear next to my download link?</a></li>
+        <li><a href="#why-did-the-extension-prompt-me-to-select-a-format">Why did the extension prompt me to select a format?</a></li>
+        <li><a href="#can-i-view-local-files-from-my-computer">Can I view local files from my computer?</a></li>
+        <li><a href="#why-did-i-get-a-download-blocked-or-xml-error-on-figshare-zenodo">Why did I get a &ldquo;Download Blocked&rdquo; or XML error on Figshare/Zenodo?</a></li>
+        <li><a href="#why-did-the-extension-prompt-me-to-select-a-format">Why did the extension prompt me to select a format?</a></li>
       </ul>
     </li>
   </ul>

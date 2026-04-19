@@ -28,7 +28,7 @@ The CORS Advantage# In the past, viewing 3D structures from private servers was 
   <meta itemprop="description" content="Authorizing Private Instances# Many research institutions and universities use self-hosted versions of GitLab, GitHub Enterprise, or Electronic Lab Notebooks (like ElabFTW) behind secure firewalls.
 By default, Mol* Linker only runs on public websites like github.com or rcsb.org. To use the extension on your private, internal network, you must authorize your custom domain.
 The CORS Advantage# In the past, viewing 3D structures from private servers was incredibly difficult due to strict browser security rules known as CORS (Cross-Origin Resource Sharing).">
-  <meta itemprop="wordCount" content="270">
+  <meta itemprop="wordCount" content="514">
 
 <title>Custom Domains (Self-Hosted Instances) | Mol* Linker Wiki</title>
 <link rel="icon" href="/Molstar_Linker/favicon.png" >
@@ -38,7 +38,7 @@ The CORS Advantage# In the past, viewing 3D structures from private servers was 
 
 
   <script defer src="/Molstar_Linker/fuse.min.js"></script>
-  <script defer src="/Molstar_Linker/en.search.min.9739a2f0b535cce9402d0496f91d1588f9293d5495c7836d957ed4d02176ea10.js" integrity="sha256-lzmi8LU1zOlALQSW&#43;R0ViPkpPVSVx4NtlX7U0CF26hA=" crossorigin="anonymous"></script>
+  <script defer src="/Molstar_Linker/en.search.min.fbf53c68391b00f2c9f679680ca0e5446bde4d57d2d22ac87cebb9035e2600c1.js" integrity="sha256-&#43;/U8aDkbAPLJ9nloDKDlRGveTVfS0irIfOu5A14mAME=" crossorigin="anonymous"></script>
 
 
 <link rel="alternate" type="application/rss+xml" href="http://localhost:1313/Molstar_Linker/docs/custom-domains/index.xml" title="Mol* Linker Wiki" />
@@ -375,6 +375,9 @@ The CORS Advantage# In the past, viewing 3D structures from private servers was 
     <li><a href="#the-cors-advantage">The CORS Advantage</a></li>
     <li><a href="#how-to-add-a-custom-domain">How to Add a Custom Domain</a></li>
     <li><a href="#managing-authorized-domains">Managing Authorized Domains</a></li>
+    <li><a href="#how-it-works-dynamic-injection">How it Works: Dynamic Injection</a></li>
+    <li><a href="#automatic-right-click-interception">Automatic Right-Click Interception</a></li>
+    <li><a href="#bypassing-strict-tracking-protections--figshare-zenodo">Bypassing Strict Tracking Protections (Figshare / Zenodo)</a></li>
   </ul>
 </nav>
 
@@ -410,6 +413,19 @@ The CORS Advantage# In the past, viewing 3D structures from private servers was 
 <li>Here, you will see a list of all currently authorized domains.</li>
 <li>Click <strong>Remove</strong> next to any domain to instantly revoke the extension&rsquo;s access to that site.</li>
 </ol>
+<h2 id="how-it-works-dynamic-injection">How it Works: Dynamic Injection<a class="anchor" href="#how-it-works-dynamic-injection">#</a></h2>
+<p>When you authorize a Custom Domain (e.g., <code>gitlab.my-university.edu</code> or <code>elabftw.my-company.com</code>) via the extension&rsquo;s popup menu, Mol* Linker does two things simultaneously:</p>
+<ol>
+<li>It safely grants the viewer the necessary network privileges to bypass strict CORS policies on that specific domain.</li>
+<li>It <strong><strong>dynamically registers</strong></strong> the Mol* Linker scanner to run on your private network.</li>
+</ol>
+<p>This means you do not need to edit the manifest or manually refresh your extension. The moment you click &ldquo;Allow&rdquo; in the browser prompt, the green Mol* Workspace badges will automatically begin appearing next to structural files on your private internal network!</p>
+<h2 id="automatic-right-click-interception">Automatic Right-Click Interception<a class="anchor" href="#automatic-right-click-interception">#</a></h2>
+<p>You don&rsquo;t always have to authorize domains manually from the popup! If you Right-Click a structural link on an unknown, unauthorized domain and select &ldquo;Open in Mol* Workspace&rdquo;, the extension&rsquo;s <strong><strong>Security Gatekeeper</strong></strong> will intercept the request. It will explain that the domain is unauthorized and offer a one-click button to authorize it and continue to the viewer.</p>
+<h2 id="bypassing-strict-tracking-protections--figshare-zenodo">Bypassing Strict Tracking Protections (Figshare / Zenodo)<a class="anchor" href="#bypassing-strict-tracking-protections--figshare-zenodo">#</a></h2>
+<p>Some scientific databases, like Figshare, do not host files directly. Instead, clicking &ldquo;Download&rdquo; triggers an HTTP redirect to an Amazon Web Services (AWS) bucket.
+Browsers with strict privacy engines (like Mozilla Firefox) often block these cross-origin redirects, causing the download to fail silently or return an XML Error page.
+<strong><strong>The Fix:</strong></strong> Adding these sites to your Authorized Custom Domains grants the extension the necessary Host Permissions to legally and securely follow the redirect, completely bypassing the tracking block!</p>
 </article>
  
       
@@ -491,6 +507,9 @@ The CORS Advantage# In the past, viewing 3D structures from private servers was 
     <li><a href="#the-cors-advantage">The CORS Advantage</a></li>
     <li><a href="#how-to-add-a-custom-domain">How to Add a Custom Domain</a></li>
     <li><a href="#managing-authorized-domains">Managing Authorized Domains</a></li>
+    <li><a href="#how-it-works-dynamic-injection">How it Works: Dynamic Injection</a></li>
+    <li><a href="#automatic-right-click-interception">Automatic Right-Click Interception</a></li>
+    <li><a href="#bypassing-strict-tracking-protections--figshare-zenodo">Bypassing Strict Tracking Protections (Figshare / Zenodo)</a></li>
   </ul>
 </nav>
 
