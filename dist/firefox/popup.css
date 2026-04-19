@@ -72,9 +72,6 @@ button, .btn-upload {
 .secondary { background-color: var(--secondary); color: var(--text-main); border-color: var(--border); margin-bottom: 8px;}
 .secondary:hover { background-color: var(--secondary-hover); }
 
-/* File Upload Hack */
-input[type="file"] { display: none; }
-
 #status {
   display: block;
   text-align: center;
