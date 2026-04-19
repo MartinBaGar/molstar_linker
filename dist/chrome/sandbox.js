@@ -1,5 +1,7 @@
 // sandbox.js
 
+window.parent.postMessage({ action: 'SANDBOX_READY' }, '*');
+
 let viewerInstance = null; // Store the viewer globally
 
 window.addEventListener('message', async (event) => {

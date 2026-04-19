@@ -11,6 +11,17 @@ const container = document.getElementById('settings-container');
 const rulesContainer = document.getElementById('custom-rules-container');
 let customTemplates = {}; 
 
+function escapeHTML(str) {
+  if (typeof str !== 'string') return str;
+  return str.replace(/[&<>'"]/g, tag => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+  }[tag]));
+}
+
 function showStatus(message, isError = false) {
   const status = document.getElementById('status');
   status.textContent = message;
@@ -146,33 +157,33 @@ function addCustomRuleCard(ruleData = null) {
   
   const card = document.createElement('details'); card.className = 'target-card custom-rule-card'; card.open = true; 
   
-  card.innerHTML = `
+    card.innerHTML = `
     <summary>
-      <span class="rule-title-display">${data.name || "New Rule"}</span>
+      <span class="rule-title-display">${escapeHTML(data.name) || "New Rule"}</span>
       <div style="display:flex; align-items:center; gap: 10px;"><button class="danger-outline delete-rule-btn" style="padding: 2px 8px; width: auto; font-size: 11px;">Delete</button><span style="font-size: 10px; opacity: 0.5;">▼</span></div>
     </summary>
     <div class="card-content">
       <div class="flex-row">
-        <div style="flex: 2;"><label>Rule Name (Internal)</label><input type="text" class="cr-name" value="${data.name}"></div>
+        <div style="flex: 2;"><label>Rule Name (Internal)</label><input type="text" class="cr-name" value="${escapeHTML(data.name)}"></div>
         <div style="flex: 1;"><label>Mode</label><select class="cr-mode"><option value="simple">Simple</option><option value="expert">Expert</option></select></div>
         <div style="flex: 1;"><label>Numbering</label><select class="cr-scheme"><option value="auth">auth_*</option><option value="label">label_*</option></select></div>
       </div>
       <div class="rule-section cr-simple-container">
         <div class="rule-section-title">Target Selection</div>
         <div class="grid-6">
-          <div><label>Chain</label><input type="text" class="cr-chain" value="${data.chain || ''}" placeholder="A"></div>
-          <div><label>Res Range</label><input type="text" class="cr-ranges" value="${data.ranges || ''}" placeholder="5-50"></div>
-          <div><label>Specific Res</label><input type="text" class="cr-specific" value="${data.specific || ''}" placeholder="10, 15"></div>
-          <div><label>Atom</label><input type="text" class="cr-atom" value="${data.atomName || ''}" placeholder="CA"></div>
-          <div><label>Element</label><input type="text" class="cr-element" value="${data.element || ''}" placeholder="FE"></div>
-          <div><label>Atom Idx</label><input type="text" class="cr-atom-index" value="${data.atomIndex || ''}" placeholder="100"></div>
+          <div><label>Chain</label><input type="text" class="cr-chain" value="${escapeHTML(data.chain || '')}" placeholder="A"></div>
+          <div><label>Res Range</label><input type="text" class="cr-ranges" value="${escapeHTML(data.ranges || '')}" placeholder="5-50"></div>
+          <div><label>Specific Res</label><input type="text" class="cr-specific" value="${escapeHTML(data.specific || '')}" placeholder="10, 15"></div>
+          <div><label>Atom</label><input type="text" class="cr-atom" value="${escapeHTML(data.atomName || '')}" placeholder="CA"></div>
+          <div><label>Element</label><input type="text" class="cr-element" value="${escapeHTML(data.element || '')}" placeholder="FE"></div>
+          <div><label>Atom Idx</label><input type="text" class="cr-atom-index" value="${escapeHTML(data.atomIndex || '')}" placeholder="100"></div>
         </div>
       </div>
       <div class="rule-section cr-expert-container" style="display: none;">
         <div class="rule-section-title">Raw MVS JSON</div>
         <div class="flex-row">
-          <div><label>Target Selector</label><textarea class="cr-json">${data.rawJson}</textarea></div>
-          <div><label>Advanced Rep Params</label><textarea class="cr-params-json" placeholder='{"ignore_hydrogens": true}'>${data.rawParamsJson}</textarea></div>
+          <div><label>Target Selector</label><textarea class="cr-json">${escapeHTML(data.rawJson)}</textarea></div>
+          <div><label>Advanced Rep Params</label><textarea class="cr-params-json" placeholder='{"ignore_hydrogens": true}'>${escapeHTML(data.rawParamsJson)}</textarea></div>
         </div>
       </div>
       <div class="rule-section">
@@ -183,15 +194,15 @@ function addCustomRuleCard(ruleData = null) {
              <div class="params-drawer cr-drawer"></div>
           </div>
           <div style="flex: 1.5;" class="cr-color-container"><label>Color</label></div>
-          <div style="flex: 0.5;"><label>Size</label><input type="number" class="cr-size" value="${data.size || ''}" step="0.5" min="0.5" max="5.0" placeholder="1.0"></div>
-          <div style="flex: 0.5;"><label>Opacity</label><input type="number" class="cr-opacity" value="${data.opacity || ''}" step="0.1" min="0" max="1.0" placeholder="1.0"></div>
+          <div style="flex: 0.5;"><label>Size</label><input type="number" class="cr-size" value="${escapeHTML(data.size || '')}" step="0.5" min="0.5" max="5.0" placeholder="1.0"></div>
+          <div style="flex: 0.5;"><label>Opacity</label><input type="number" class="cr-opacity" value="${escapeHTML(data.opacity || '')}" step="0.1" min="0" max="1.0" placeholder="1.0"></div>
         </div>
       </div>
       <div class="rule-section">
         <div class="rule-section-title">Annotations & View</div>
         <div class="flex-row" style="align-items: flex-end;">
-          <div style="flex: 1.5;"><label>Floating Label</label><input type="text" class="cr-label" value="${data.label || ''}" placeholder="e.g. Active Site"></div>
-          <div style="flex: 1.5;"><label>Hover Tooltip</label><input type="text" class="cr-tooltip" value="${data.tooltip || ''}" placeholder="e.g. Binds ATP"></div>
+          <div style="flex: 1.5;"><label>Floating Label</label><input type="text" class="cr-label" value="${escapeHTML(data.label || '')}" placeholder="e.g. Active Site"></div>
+          <div style="flex: 1.5;"><label>Hover Tooltip</label><input type="text" class="cr-tooltip" value="${escapeHTML(data.tooltip || '')}" placeholder="e.g. Binds ATP"></div>
           <div style="flex: 1; margin-bottom: 8px;">
             <label style="display:inline-flex; align-items:center; cursor:pointer;">
               <input type="checkbox" class="cr-focus" ${data.focus ? 'checked' : ''} style="width:16px; height:16px; margin:0 8px 0 0;"> Focus Camera Here
@@ -374,8 +385,34 @@ document.getElementById('export-json').onclick = () => {
 };
 
 document.getElementById('import-json').onchange = (e) => {
-  if (!e.target.files[0]) return; const reader = new FileReader();
-  reader.onload = function(evt) { try { injectSettingsIntoUI({ ...AppConfig.getDefaults(), ...JSON.parse(evt.target.result) }); showStatus('Imported!'); } catch { showStatus('Error.', true); } };
+  if (!e.target.files[0]) return; 
+  const reader = new FileReader();
+  reader.onload = function(evt) { 
+    try { 
+      const parsed = JSON.parse(evt.target.result);
+      const safeSettings = { ...AppConfig.getDefaults() };
+      
+      // FIX F5: Only copy known top-level keys
+      for (const key of Object.keys(safeSettings)) {
+        if (key in parsed) safeSettings[key] = parsed[key];
+      }
+      
+      // Deep validate custom rules
+      if (Array.isArray(parsed.customRules)) {
+         safeSettings.customRules = parsed.customRules.filter(r => r && typeof r === 'object').map(r => ({
+             name: r.name, rep: r.rep, colorType: r.colorType, colorVal: r.colorVal,
+             size: r.size, opacity: r.opacity, mode: r.mode, scheme: r.scheme,
+             chain: r.chain, ranges: r.ranges, specific: r.specific, atomName: r.atomName,
+             element: r.element, atomIndex: r.atomIndex, label: r.label, tooltip: r.tooltip,
+             focus: !!r.focus, rawJson: r.rawJson, rawParamsJson: r.rawParamsJson,
+             subParams: typeof r.subParams === 'object' ? r.subParams : {}
+         })).slice(0, 50); // Cap at 50
+      }
+      
+      injectSettingsIntoUI(safeSettings); 
+      showStatus('Imported!'); 
+    } catch { showStatus('Error.', true); } 
+  };
   reader.readAsText(e.target.files[0]); e.target.value = '';
 };
 
@@ -398,7 +435,7 @@ function refreshCustomDomainList() {
       const row = document.createElement('div');
       row.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; margin-bottom: 8px;";
       row.innerHTML = `<div style="display: flex; align-items: center; gap: 10px;"><span>🌐</span><span style="font-weight: 500;">${domain}</span></div>
-                       <button class="danger-outline remove-domain-btn" data-domain="${domain}" style="padding: 4px 10px; font-size: 12px;">Remove</button>`;
+                       <button class="danger-outline remove-domain-btn" data-domain="${escapeHTML(domain)}" style="padding: 4px 10px; font-size: 12px;">Remove</button>`;
       container.appendChild(row);
     });
     

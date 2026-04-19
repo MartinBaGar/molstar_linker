@@ -166,5 +166,10 @@ const observer = new MutationObserver(() => {
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(injectMolstarLinker, 500);
 });
+// FIX F8: Disconnect the observer when the SPA navigates or unloads
+window.addEventListener('unload', () => {
+  if (observer) observer.disconnect();
+  clearTimeout(debounceTimer);
+});
 observer.observe(document.body, { childList: true, subtree: true });
 injectMolstarLinker();

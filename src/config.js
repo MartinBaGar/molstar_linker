@@ -1,4 +1,6 @@
 // config.js
+// AppConfig.ALLOWED_FORMATS = new Set(['pdb','mmcif','cif','gro','mol','mol2','sdf','xyz','bcif']);
+
 
 const AppConfig = {
   RepSchema: {
