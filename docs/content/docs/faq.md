@@ -54,3 +54,18 @@ Mol\* Linker's Smart Scanner looks at the URL, the HTML attributes, and the surr
 ### Why did the extension prompt me to select a format? {#why-did-the-extension-prompt-me-to-select-a-format}
 
 When you use the Right-Click menu on an opaque link (a link that does not explicitly end in `.pdb`, `.cif`, etc.), the extension securely passes the file to the viewer but flags the format as "unknown". To prevent the Mol\* engine from crashing while trying to parse a PDB as a Gromacs trajectory, it safely pauses and asks you to confirm the format before rendering.
+
+
+### Can I view local files from my computer? {#can-i-view-local-files-from-my-computer}
+
+Yes! Click the extension icon to open the popup, and simply Drag and Drop your local structural file into the dashed box. You can also drag and drop files directly into an already open Mol\* Workspace tab! The file is read locally and is never uploaded to the internet.
+
+
+### Why did I get a "Download Blocked" or XML error on Figshare/Zenodo? {#why-did-i-get-a-download-blocked-or-xml-error-on-figshare-zenodo}
+
+Browsers with strict privacy settings (especially Firefox) block "cross-origin redirects," which is how sites like Figshare route files to Amazon AWS servers. Mol\* Linker detects this block to prevent the 3D engine from crashing. To fix it, simply add the site to your Authorized Custom Domains in the Advanced Studio to grant the extension a secure bypass pass.
+
+
+### Why did the extension prompt me to select a format? {#why-did-the-extension-prompt-me-to-select-a-format}
+
+When you use the Right-Click menu on an opaque link (a link that does not explicitly end in `.pdb`, `.cif`, etc.), the extension securely passes the file to the viewer but flags the format as "unknown". To prevent the Mol\* engine from crashing while trying to parse a PDB as a Gromacs trajectory, it safely pauses and asks you to confirm the format before rendering.

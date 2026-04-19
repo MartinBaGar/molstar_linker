@@ -14,6 +14,15 @@ Once the extension is installed, no configuration is needed to get started.
 3.  Click the badge — the structure opens in the Mol\* viewer in a new tab, rendered with your current settings
 
 
+## View Local Files (Drag &amp; Drop) {#view-local-files--drag-and-drop}
+
+Mol\* Linker doubles as a lightning-fast offline desktop viewer! If you have a structure on your computer (e.g., from AlphaFold or PyMOL):
+
+1.  Click the Mol\* Linker extension icon in your browser toolbar.
+2.  ****Drag and Drop**** your local \`.pdb\`, \`.cif\`, or \`.gro\` file directly into the dashed box.
+3.  The workspace will instantly open and render your file locally—no upload required!
+
+
 ## Change the Active Preset {#change-the-active-preset}
 
 Click the extension icon in your browser toolbar to open the popup:
@@ -33,10 +42,11 @@ Click **Open Advanced Studio** in the popup, or right-click the extension icon a
 Mol\* Linker is equipped with a Universal "Smart Scanner" that can automatically detect structural files on almost any database (like Figshare, Zenodo, or university servers). If the extension detects a valid structure nearby, the Mol\* Workspace badge will appear automatically.
 
 
-### The Right-Click Fallback {#the-right-click-fallback}
+### The Right-Click Fallback &amp; Gatekeeper {#the-right-click-fallback-and-gatekeeper}
 
-If you are on a highly customized or obscure database where the green badge does not automatically appear next to a download link, you can still use the extension!
+If you are on a highly customized database (like Figshare or Zenodo) where the green badge does not automatically appear next to a download link:
 
 1.  ****Right-Click**** the download button or link.
 2.  Select **\*"Open in Mol** Workspace"\*\* from the browser's context menu.
-3.  If the extension cannot automatically guess the file type from the website's code, it will present a clean dropdown asking you if it is a PDB, mmCIF, GRO, etc. Select the format, and your workspace will launch instantly!
+3.  ****The Gatekeeper:**** If the site is not yet authorized, the extension will securely intercept the request and ask if you want to grant it access.
+4.  ****Format Check:**** If the extension cannot guess the file type from the website's code, it will present a clean dropdown asking you to confirm the format before launching.

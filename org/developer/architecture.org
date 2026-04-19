@@ -23,12 +23,12 @@ To seamlessly load multi-megabyte structural files from dynamic Single Page Appl
 ** 3. The Privileged Shell (The Viewer)
 - *Files:* =src/viewer.html=, =src/viewer.js=
 - *Environment:* Extension Context (=chrome-extension://...=)
-- *Role:* This is the layer with elevated extension privileges. It executes the critical *CORS Bypass*. 
-- *Action:*
-  1. Uses the extension's =host_permissions= to execute a native =fetch()= on the target URL, perfectly bypassing standard browser CORS restrictions.
-  2. Translates the downloaded Blob into a Base64 Data URI directly in the user's RAM.
-  3. Reads the user's custom settings from =chrome.storage=.
-  4. Dynamically spawns an =<iframe>= pointing to the Sandbox, and passes the Base64 data and user settings through the iframe wall via =postMessage()=.
+- *Role:* This layer operates with elevated privileges and acts as the **Master Router** and **Security Gatekeeper**.
+- *Actions:*
+  1. **Routing:** It checks the incoming parameters to determine if it should load a Local File (via Extension Storage), a Blob URL (via Options Drag & Drop), a Web URL, or an Empty Workspace.
+  2. **Gatekeeping:** If a remote URL is requested via Right-Click, it checks if the domain is authorized. If not, it halts execution and prompts the user to grant Host Permissions.
+  3. **CORS Bypass & Fetch:** For authorized domains, it uses native =fetch()= to securely bypass browser CORS restrictions. It also reads the first 150 characters of the downloaded Blob to ensure it wasn't silently blocked by Firefox's Enhanced Tracking Protection (ETP).
+  4. **Strict Injection:** It dynamically spawns an =<iframe>= pointing to the Sandbox. To satisfy modern browser specs, it uses a strict =e.source === iframe.contentWindow= handshake to securely pass the Base64 structure data into the sandboxed =null= origin via =postMessage('*')=.
 
 ** 4. The Engine (The Sandbox)
 - *Files:* =src/sandbox.html=, =src/sandbox.js=, =src/mvs-builder.js=

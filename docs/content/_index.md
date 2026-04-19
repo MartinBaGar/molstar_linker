@@ -24,6 +24,7 @@ No downloads. No local software. Click a badge, see your structure in 3D.
 -   Named template library — save, share, and import JSON configurations
 -   Works on private / self-hosted GitLab instances
 -   Handles SPA navigation (no page reload required)
+-   ****NEW:**** Offline Drag &amp; Drop functionality for local files directly from your computer
 
 
 ## Supported Formats {#supported-formats}

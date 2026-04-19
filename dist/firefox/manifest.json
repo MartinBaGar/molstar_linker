@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Mol* Linker",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Instantly view PDB and mmCIF files directly from GitHub and GitLab using MolViewSpec and Mol*.",
   "permissions": [
     "activeTab",

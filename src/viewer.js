@@ -229,7 +229,53 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // SCENARIO 3: Remote URL with unknown format (right-click context menu path)
-    if (!ALLOWED_FORMATS.has(format)) {
+        if (!ALLOWED_FORMATS.has(format)) {
+        const targetDomain = new URL(rawUrl).hostname.replace(/^www\./, '');
+        const defaultDomains = ['github.com', 'gitlab.com', 'rcsb.org', 'alphafold.ebi.ac.uk'];
+        const isDefault = defaultDomains.some(d => targetDomain.includes(d));
+
+        // 1. Check if the domain is authorized
+        if (!isDefault) {
+            const storageData = await new Promise(resolve => chrome.storage.sync.get({ customDomains: [] }, resolve));
+            const isCustomAuthorized = storageData.customDomains.includes(targetDomain);
+
+            if (!isCustomAuthorized) {
+                // Not authorized: Show the Prompt
+                loadingDiv.innerHTML = `
+                    <div style="background:white;padding:20px 30px;border-radius:8px;
+                                box-shadow:0 4px 12px rgba(0,0,0,.15);text-align:center;
+                                color:#333;max-width:400px;margin:0 auto">
+                        <h3 style="margin-top:0;color:#d73a49">Unauthorized Domain</h3>
+                        <p style="font-size:14px;color:#666;margin-bottom:20px">
+                            Trying to open a link from an unauthorized domain (<strong>${targetDomain}</strong>).<br><br>
+                            Would you like to authorize this domain?
+                        </p>
+                        <div style="display:flex; gap: 10px;">
+                            <button id="auth-cancel" style="background:#eee;color:#333;border:none;padding:10px;font-weight:bold;border-radius:4px;cursor:pointer;flex:1;">Cancel</button>
+                            <button id="auth-confirm" style="background:#0969da;color:white;border:none;padding:10px;font-weight:bold;border-radius:4px;cursor:pointer;flex:1;">Yes, Authorize</button>
+                        </div>
+                    </div>`;
+
+                document.getElementById('auth-confirm').addEventListener('click', () => {
+                    const extApi = typeof globalThis.browser !== 'undefined' ? globalThis.browser : chrome;
+                    extApi.tabs.create({ url: `options.html?domain=${encodeURIComponent(targetDomain)}` });
+                    window.close(); // Close the viewer so they can authorize in the Studio
+                });
+
+                document.getElementById('auth-cancel').addEventListener('click', () => {
+                    loadingDiv.innerHTML = `
+                        <div style="background:white;padding:20px 30px;border-radius:8px;
+                                    box-shadow:0 4px 12px rgba(0,0,0,.15);text-align:center;
+                                    color:#d73a49;max-width:400px;margin:0 auto;font-weight:bold;font-size:16px;">
+                            Not authorized. Operation cancelled.
+                        </div>`;
+                });
+
+                return; // Stop execution here!
+            }
+        }
+
+        // 2. If authorized (or default), show the Format Selector
         loadingDiv.innerHTML = `
             <div style="background:white;padding:20px 30px;border-radius:8px;
                         box-shadow:0 4px 12px rgba(0,0,0,.15);text-align:center;

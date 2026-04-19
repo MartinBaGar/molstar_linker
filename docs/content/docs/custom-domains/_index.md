@@ -48,3 +48,15 @@ When you authorize a Custom Domain (e.g., `gitlab.my-university.edu` or `elabftw
 2.  It ****dynamically registers**** the Mol\* Linker scanner to run on your private network.
 
 This means you do not need to edit the manifest or manually refresh your extension. The moment you click "Allow" in the browser prompt, the green Mol\* Workspace badges will automatically begin appearing next to structural files on your private internal network!
+
+
+## Automatic Right-Click Interception {#automatic-right-click-interception}
+
+You don't always have to authorize domains manually from the popup! If you Right-Click a structural link on an unknown, unauthorized domain and select "Open in Mol\* Workspace", the extension's ****Security Gatekeeper**** will intercept the request. It will explain that the domain is unauthorized and offer a one-click button to authorize it and continue to the viewer.
+
+
+## Bypassing Strict Tracking Protections (Figshare / Zenodo) {#bypassing-strict-tracking-protections--figshare-zenodo}
+
+Some scientific databases, like Figshare, do not host files directly. Instead, clicking "Download" triggers an HTTP redirect to an Amazon Web Services (AWS) bucket.
+Browsers with strict privacy engines (like Mozilla Firefox) often block these cross-origin redirects, causing the download to fail silently or return an XML Error page.
+****The Fix:**** Adding these sites to your Authorized Custom Domains grants the extension the necessary Host Permissions to legally and securely follow the redirect, completely bypassing the tracking block!
