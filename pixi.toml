@@ -5,7 +5,126 @@ name = "Molstar_Linker"
 platforms = ["linux-64"]
 version = "0.1.0"
 
-[tasks]
-
 [dependencies]
 hugo = ">=0.160.1,<0.161"
+
+# ── Shared directory variables, available as $VAR in every task ──────────────
+[activation.env]
+SRC_DIR       = "src"
+MANIFESTS_DIR = "manifests"
+DIST_DIR      = "dist"
+RELEASES_DIR  = "releases"
+DOCS_DIR      = "docs"
+
+# ── Tasks ─────────────────────────────────────────────────────────────────────
+
+# 1. DAILY DEV — pixi run save "my message"
+[tasks.save]
+description = "Stage all changes, commit with a message, and push to main"
+args        = ["msg"]
+cmd         = 'git add . && git commit -m "{{ msg }}" && git push origin main'
+
+# 2. BUMP — pixi run bump 1.2.3
+[tasks.bump]
+description = "Update the version field in both Chrome and Firefox manifests"
+args        = ["version"]
+cmd         = """
+echo "Bumping version to {{ version }}..." &&
+python3 -c "
+import json
+for f in ['$MANIFESTS_DIR/chrome.json', '$MANIFESTS_DIR/firefox.json']:
+    d = json.load(open(f))
+    d['version'] = '{{ version }}'
+    json.dump(d, open(f, 'w'), indent=2)
+" &&
+echo "✅ Version bumped to {{ version }}!"
+"""
+
+# 3. BUILD
+[tasks.build-chrome]
+description = "Copy src + chrome manifest into dist/chrome/"
+cmd         = """
+mkdir -p $DIST_DIR/chrome &&
+cp -r $SRC_DIR/* $DIST_DIR/chrome/ &&
+cp $MANIFESTS_DIR/chrome.json $DIST_DIR/chrome/manifest.json &&
+echo "✅ Chrome build ready in $DIST_DIR/chrome/"
+"""
+
+[tasks.build-firefox]
+description = "Copy src + firefox manifest into dist/firefox/"
+cmd         = """
+mkdir -p $DIST_DIR/firefox &&
+cp -r $SRC_DIR/* $DIST_DIR/firefox/ &&
+cp $MANIFESTS_DIR/firefox.json $DIST_DIR/firefox/manifest.json &&
+echo "✅ Firefox build ready in $DIST_DIR/firefox/"
+"""
+
+[tasks.build]
+description = "Build both Chrome and Firefox extensions in parallel"
+depends-on  = ["build-chrome", "build-firefox"]
+
+# 4. ZIP — pixi run zip 1.2.3
+[tasks.zip]
+description = "Build (if needed) then zip both extensions for the given version"
+args        = ["version"]
+depends-on  = ["build"]
+cmd         = """
+echo "Zipping extensions v{{ version }}..." &&
+mkdir -p $RELEASES_DIR &&
+(cd $DIST_DIR/chrome && zip -r ../../$RELEASES_DIR/molstar_linker_chrome-v{{ version }}.zip . -x "*.DS_Store" > /dev/null) &&
+(cd $DIST_DIR/firefox && zip -r ../../$RELEASES_DIR/molstar_linker_firefox-v{{ version }}.zip . -x "*.DS_Store" > /dev/null) &&
+echo "✅ Packages ready in $RELEASES_DIR/"
+"""
+
+# 5. RELEASE — pixi run publish 1.2.3
+#    Sequential steps with ordering constraints mean a bash script is cleaner
+#    than trying to wire all of this through depends-on alone.
+[tasks.publish]
+description = "Full release pipeline: bump → build → zip → commit → tag → push → GitHub release"
+args        = ["version"]
+cmd         = """
+bash -c '
+set -e
+
+echo "==> [1/4] Bumping manifests..."
+pixi run bump {{ version }}
+
+echo "==> [2/4] Building and zipping..."
+pixi run zip {{ version }}
+
+echo "==> [3/4] Committing, tagging, and pushing..."
+git add $MANIFESTS_DIR/chrome.json $MANIFESTS_DIR/firefox.json
+git commit -m "chore: bump version to v{{ version }}" \
+    || echo "Nothing to commit — version already at {{ version }}."
+git tag v{{ version }}
+git push origin main
+git push origin main --tags
+
+echo "==> [4/4] Creating GitHub release..."
+if command -v gh &>/dev/null; then
+    gh release create v{{ version }} \
+        $RELEASES_DIR/molstar_linker_chrome-v{{ version }}.zip \
+        $RELEASES_DIR/molstar_linker_firefox-v{{ version }}.zip \
+        --title "Release v{{ version }}" \
+        --generate-notes
+    echo "🚀 Release v{{ version }} published!"
+else
+    echo "⚠️  gh CLI not found. Upload the .zips from $RELEASES_DIR/ manually."
+fi
+'
+"""
+
+# 6. CLEANUP
+[tasks.clean]
+description = "Remove the dist/ and releases/ directories"
+cmd         = "rm -rf $DIST_DIR $RELEASES_DIR && echo '✅ Cleaned dist/ and releases/'"
+
+# 7. DEV SERVER
+[tasks.serve]
+description = "Start the Hugo development server (with drafts)"
+cmd         = "echo 'Starting Hugo server in $DOCS_DIR...' && hugo server -s $DOCS_DIR -D --disableFastRender"
+
+# 8. PRODUCTION BUILD
+[tasks.build-site]
+description = "Build the Hugo static site for production"
+cmd         = "hugo --minify"
