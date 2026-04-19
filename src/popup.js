@@ -56,35 +56,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // 3. Load from JSON File
-  document.getElementById('file-upload').addEventListener('change', (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      try {
-        const customSettings = JSON.parse(e.target.result);
-        const newSettings = { ...AppConfig.getDefaults(), ...customSettings };
-        
-        extApi.storage.sync.set(newSettings, () => {
-          statusDiv.textContent = "JSON preset loaded!";
-          statusDiv.style.color = "var(--success)";
-          setTimeout(() => {
-            extApi.tabs.query({active: true, currentWindow: true}, (tabs) => {
-              if (tabs[0]) extApi.tabs.reload(tabs[0].id);
-            });
-            window.close();
-          }, 1000);
-        });
-      } catch (err) {
-        statusDiv.textContent = "Error: Invalid JSON file.";
-        statusDiv.style.color = "var(--danger)";
-      }
-    };
-    reader.readAsText(file);
-  });
-
   // 4. Link to Advanced Options
   document.getElementById('open-options').addEventListener('click', () => {
     extApi.runtime.openOptionsPage();
