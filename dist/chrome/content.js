@@ -43,7 +43,7 @@ function getStructureInfo(href, linkElement) {
   // Step 2: The Generalized "3-Ring" DOM Scanner for Opaque URLs
   if (!extWithQuery && linkElement) {
     
-    // Ring 1: The link text itself (e.g., <button>Download SITO.pdb</button>)
+    // Ring 1: The link text itself (e.g., <button>Download structure.pdb</button>)
     extWithQuery = extractExtensionFromText(linkElement.textContent);
     
     // Ring 2: Standard HTML Attributes (title, download, etc.)
@@ -96,7 +96,7 @@ function getStructureInfo(href, linkElement) {
 function makeBadge(rawUrl, formatStr, originalHref) {
   const badge = document.createElement('button');
   badge.type = 'button';
-  badge.textContent = 'Mol* (Workspace)';
+  badge.textContent = 'M*L';
   badge.dataset.msBadge = 'true';
   badge.dataset.originalHref = originalHref;
   

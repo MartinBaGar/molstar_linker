@@ -186,34 +186,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const urlParams  = new URLSearchParams(window.location.search);
     const rawUrl     = urlParams.get('fileUrl');
     const format     = urlParams.get('format');
-    const localBlob  = urlParams.get('localBlob');
-    const filename   = urlParams.get('filename');
     const loadingDiv = document.getElementById('loading');
-
-    // SCENARIO 0: Blob handoff from the Options page
-    // Options page creates a short-lived blob URL and passes it here so the
-    // file never travels over the network.
-    if (localBlob && (
-        localBlob.startsWith('blob:chrome-extension://') ||
-        localBlob.startsWith('blob:moz-extension://')
-    )) {
-        if (loadingDiv) loadingDiv.innerText = 'Transferring local file...';
-        try {
-            const response = await fetch(localBlob);
-            const blob = await response.blob();
-            URL.revokeObjectURL(localBlob);
-            const dataUri = await new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.readAsDataURL(blob);
-            });
-            spawnIframe(dataUri, format, 'local-file://' + (filename || 'structure'));
-        } catch (err) {
-            console.error("Blob Transfer Error:", err);
-            if (loadingDiv) loadingDiv.innerText = 'Failed to transfer local file.';
-        }
-        return;
-    }
 
     // SCENARIO 1: No URL — open an empty workspace (popup "Open Empty Studio")
     if (!rawUrl) {

@@ -33,18 +33,15 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         const viewerUrl = chrome.runtime.getURL(
             `viewer.html?fileUrl=${encodeURIComponent(info.linkUrl)}&format=unknown`
         );
-        chrome.tabs.create({ url: viewerUrl });
+    chrome.tabs.create({ url: viewerUrl });
     }
 });
 
 // ORIGINAL: Handle standard Content Script Clicks
 chrome.runtime.onMessage.addListener((message, sender) => {
     if (message.action !== "open_viewer") return;
-
     if (!sender.tab || !sender.tab.id) return;
-
     if (!message.url || !isSafeUrl(message.url)) return;
-
     if (!ALLOWED_FORMATS.has(message.format)) return;
 
     const viewerUrl = chrome.runtime.getURL(
