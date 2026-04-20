@@ -2,7 +2,7 @@
 
 const ALLOWED_URL_SCHEMES = ['https:'];
 
-// FIX F7: Canonical format list including 'cif'
+// FIX F7: Canonical format list
 const ALLOWED_FORMATS = new Set(['pdb', 'cif', 'mmcif', 'gro', 'mol', 'mol2', 'sdf', 'xyz', 'bcif']);
 const MAX_BYTES = 25 * 1024 * 1024;
 

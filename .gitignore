@@ -20,6 +20,13 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+ 
 # pixi environments
 .pixi/*
 !.pixi/config.toml
+
+# org capture
+notes.org
+
+# Testing
+scratch.js
