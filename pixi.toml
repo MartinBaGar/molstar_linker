@@ -7,6 +7,7 @@ version = "0.1.0"
 
 [dependencies]
 hugo = ">=0.160.1,<0.161"
+nodejs = ">=25.8.2,<25.9"
 
 # ── Shared directory variables, available as $VAR in every task ──────────────
 [activation.env]

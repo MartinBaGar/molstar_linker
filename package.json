@@ -1,0 +1,30 @@
+{
+  "name": "molstar_linker",
+  "version": "1.0.0",
+  "description": "[![Chrome Web Store](https://img.shields.io/badge/Chrome-Available-blue?logo=google-chrome)](#) [![Firefox Add-ons](https://img.shields.io/badge/Firefox-Available-orange?logo=firefox)](#)   * [ ] [![Version](https://img.shields.io/badge/Version-2.0.0-success)](#)",
+  "main": "scratch.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "build": "node assemble.js && tsc",
+    "watch": "tsc -w"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MartinBaGar/Molstar_Linker.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/MartinBaGar/Molstar_Linker/issues"
+  },
+  "homepage": "https://github.com/MartinBaGar/Molstar_Linker#readme",
+  "devDependencies": {
+    "@types/chrome": "^0.1.40",
+    "@types/firefox-webext-browser": "^143.0.0",
+    "typescript": "^6.0.3"
+  }
+}
