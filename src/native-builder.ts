@@ -365,7 +365,14 @@ export const NativeBuilder = {
     const structure = component.obj?.data;
     if (!structure) return;
 
-    const loci = Structure.toStructureElementLoci(structure);
-    await plugin.managers.structure.measurement.addLabel(loci);
-  },
+    // 1. Get the Loci of your isolated custom rule (the sub-structure)
+    const subLoci = Structure.toStructureElementLoci(structure);
+
+    // 2. Remap it to the ROOT structure so the Measurement API 
+    // knows exactly where it is in the global 3D coordinate space!
+    const rootLoci = StructureElement.Loci.remap(subLoci, structure.root);
+
+    // 3. Add the label
+    await plugin.managers.structure.measurement.addLabel(rootLoci);
+  }
 };

@@ -40586,8 +40586,9 @@ ${subTree.join("\n")}`;
     async apply3DLabel(plugin, component) {
       const structure = component.obj?.data;
       if (!structure) return;
-      const loci = Structure.toStructureElementLoci(structure);
-      await plugin.managers.structure.measurement.addLabel(loci);
+      const subLoci = Structure.toStructureElementLoci(structure);
+      const rootLoci = element_exports.Loci.remap(subLoci, structure.root);
+      await plugin.managers.structure.measurement.addLabel(rootLoci);
     }
   };
 })();
