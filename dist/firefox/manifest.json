@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Mol* Linker",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "description": "Instantly view PDB and mmCIF files directly from GitHub and GitLab using MolViewSpec and Mol*.",
   "permissions": [
     "activeTab",
@@ -47,9 +47,11 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "molstar-linker@me.fr",
-        "strict_min_version": "102.0",
-        "data_collection_permissions": {
-        "required": ["none"]
+      "strict_min_version": "102.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
       }
     }
   }
