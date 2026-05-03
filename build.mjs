@@ -8,6 +8,8 @@ await esbuild.build({
     'src/viewer.ts',
     'src/popup.ts',
     'src/options.ts',
+    'src/config.ts',
+    'src/mvs-builder.ts'
   ],
   bundle:    true,
   outdir:    'dist',
@@ -16,4 +18,4 @@ await esbuild.build({
   sourcemap: true,
 });
 
-console.log('✅  esbuild done');
+console.log('✅ esbuild done');

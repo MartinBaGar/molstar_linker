@@ -19,7 +19,7 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "molstar": "5.4.2"
+    "molstar": "^5.5.0"
   },
   "repository": {
     "type": "git",

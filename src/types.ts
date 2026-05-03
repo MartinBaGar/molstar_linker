@@ -27,6 +27,7 @@ export interface TargetDefinition {
   rep: RepType;
   color: string;
   size: number | null;
+  mvsSelector?: string | null;
 }
 
 // ---------------------------------------------------------------------------

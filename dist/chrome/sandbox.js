@@ -45,7 +45,8 @@
         { id: "ligand", selector: "ligand", label: "Ligands & Small Molecules", rep: "ball_and_stick", color: "element-symbol", size: 1 },
         { id: "carbs", selector: "branched", label: "Carbohydrates & Glycans", rep: "carbohydrate", color: "chain-id", size: null },
         { id: "ion", selector: "ion", label: "Single Ions", rep: "ball_and_stick", color: "element-symbol", size: 0.7 },
-        { id: "water", selector: "water", label: "Water / Solvent", rep: "off", color: "red", size: null },
+        { id: "lipid", selector: "lipid", label: "Lipids", rep: "line", color: "element-symbol", size: 0.7, mvsSelector: null },
+        { id: "water", selector: "water", label: "Water / Solvent", rep: "line", color: "element-symbol", size: null },
         { id: "all", selector: "all", label: "All", rep: "ball_and_stick", color: "element-symbol", size: 1 }
       ];
       presets = {
@@ -323,6 +324,8 @@
             if (["protein", "nucleic"].includes(target.selector)) {
               representationNode.children.push(...polymerColorOverrides);
             }
+            const mvsSelector = "mvsSelector" in target ? target.mvsSelector : target.selector;
+            if (mvsSelector === null || mvsSelector === void 0) continue;
             branches.push({
               kind: "component",
               params: { selector: target.selector },

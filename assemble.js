@@ -21,6 +21,8 @@ const COMPILED = [
   'viewer.js',
   'popup.js',
   'options.js',
+  'config.js',
+  'mvs-builder.js',
 ];
 
 for (const file of COMPILED) {

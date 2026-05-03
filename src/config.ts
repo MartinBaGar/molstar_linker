@@ -28,7 +28,8 @@ const targets: TargetDefinition[] = [
   { id: "ligand",   selector: "ligand",   label: "Ligands & Small Molecules",   rep: "ball_and_stick",color: "element-symbol", size: 1.0  },
   { id: "carbs",    selector: "branched", label: "Carbohydrates & Glycans",     rep: "carbohydrate",  color: "chain-id",      size: null },
   { id: "ion",      selector: "ion",      label: "Single Ions",                 rep: "ball_and_stick",color: "element-symbol", size: 0.7  },
-  { id: "water",    selector: "water",    label: "Water / Solvent",             rep: "off",           color: "red",           size: null },
+  { id: "lipid", selector: "lipid", label: "Lipids", rep: "line", color: "element-symbol", size: 0.7, mvsSelector: null },
+  { id: "water",    selector: "water",    label: "Water / Solvent",             rep: "line",          color: "element-symbol", size: null },
   { id: "all",      selector: "all",      label: "All",                         rep: "ball_and_stick",color: "element-symbol", size: 1.0  },
 ];
 

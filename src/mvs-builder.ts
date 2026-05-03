@@ -306,6 +306,9 @@ export const MvsBuilder = {
         (representationNode.children as MvsNode[]).push(...polymerColorOverrides);
       }
 
+      const mvsSelector = 'mvsSelector' in target ? target.mvsSelector : target.selector;
+      if (mvsSelector === null || mvsSelector === undefined) continue;
+
       branches.push({
         kind: 'component',
         params: { selector: target.selector },
