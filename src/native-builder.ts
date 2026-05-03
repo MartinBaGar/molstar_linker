@@ -139,7 +139,7 @@ export const NativeBuilder = {
 
       // 3D label — uses the same API as Measurements › Add › Label
       if (rule.label) {
-        await this.apply3DLabel(plugin, component);
+        await this.apply3DLabel(plugin, component, rule); 
       }
 
       // Hover tooltip
@@ -350,29 +350,41 @@ export const NativeBuilder = {
   },
 
   // -------------------------------------------------------------------------
-  // 3D label — uses the same Measurements API as the Mol* UI:
-  //   Measurements panel › Add › Label
-  //
-  // The label is anchored to the centroid of the component's loci and
-  // appears as a floating annotation in the 3D viewport.
-  // It displays the standard Mol* loci description (residue name / number /
-  // chain); custom text lives in the hover tooltip (activeTooltips above).
+  // 3D label — uses the same Measurements API as the Mol* UI.
   // -------------------------------------------------------------------------
   async apply3DLabel(
     plugin: PluginContext,
     component: any,
+    rule: CustomRule
   ): Promise<void> {
     const structure = component.obj?.data;
     if (!structure) return;
 
-    // 1. Get the Loci of your isolated custom rule (the sub-structure)
+    // 1. Map to Root so coordinates align globally
     const subLoci = Structure.toStructureElementLoci(structure);
-
-    // 2. Remap it to the ROOT structure so the Measurement API 
-    // knows exactly where it is in the global 3D coordinate space!
     const rootLoci = StructureElement.Loci.remap(subLoci, structure.root);
 
-    // 3. Add the label
+    // 2. Add the default label safely through the Measurements API
     await plugin.managers.structure.measurement.addLabel(rootLoci);
+
+    // 3. Immediately retrieve the label we just created
+    const labels = plugin.managers.structure.measurement.state.labels;
+    const newLabelCell = labels[labels.length - 1];
+
+    if (newLabelCell) {
+      // 4. Update the label with custom text, size, and border styles
+      const update = plugin.state.data.build();
+      
+      update.to(newLabelCell.transform.ref).update((oldParams: any) => ({
+        ...oldParams,
+        customText: rule.label,
+        sizeFactor: rule.size ? parseFloat(rule.size) : 1,
+        borderWidth: rule.subParams?.borderWidth !== undefined ? parseFloat(String(rule.subParams.borderWidth)) : 0.2,
+        borderColor: rule.subParams?.borderColor !== undefined ? Color.fromHexStyle(String(rule.subParams.borderColor)) : Color.fromHexStyle('#000000'),
+        background: false // Removes the default dark box
+      }));
+      
+      await plugin.state.data.updateTree(update).run();
+    }
   }
 };

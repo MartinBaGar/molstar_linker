@@ -40426,7 +40426,7 @@ ${subTree.join("\n")}`;
         if (!component?.obj?.data) continue;
         await this.applyCustomRuleRepresentation(plugin, component, rule);
         if (rule.label) {
-          await this.apply3DLabel(plugin, component);
+          await this.apply3DLabel(plugin, component, rule);
         }
         const hoverContent = [
           rule.label ? `\u{1F3F7}\uFE0F ${rule.label}` : "",
@@ -40575,20 +40575,29 @@ ${subTree.join("\n")}`;
       );
     },
     // -------------------------------------------------------------------------
-    // 3D label — uses the same Measurements API as the Mol* UI:
-    //   Measurements panel › Add › Label
-    //
-    // The label is anchored to the centroid of the component's loci and
-    // appears as a floating annotation in the 3D viewport.
-    // It displays the standard Mol* loci description (residue name / number /
-    // chain); custom text lives in the hover tooltip (activeTooltips above).
+    // 3D label — uses the same Measurements API as the Mol* UI.
     // -------------------------------------------------------------------------
-    async apply3DLabel(plugin, component) {
+    async apply3DLabel(plugin, component, rule) {
       const structure = component.obj?.data;
       if (!structure) return;
       const subLoci = Structure.toStructureElementLoci(structure);
       const rootLoci = element_exports.Loci.remap(subLoci, structure.root);
       await plugin.managers.structure.measurement.addLabel(rootLoci);
+      const labels = plugin.managers.structure.measurement.state.labels;
+      const newLabelCell = labels[labels.length - 1];
+      if (newLabelCell) {
+        const update = plugin.state.data.build();
+        update.to(newLabelCell.transform.ref).update((oldParams) => ({
+          ...oldParams,
+          customText: rule.label,
+          sizeFactor: rule.size ? parseFloat(rule.size) : 1,
+          borderWidth: rule.subParams?.borderWidth !== void 0 ? parseFloat(String(rule.subParams.borderWidth)) : 0.2,
+          borderColor: rule.subParams?.borderColor !== void 0 ? Color.fromHexStyle(String(rule.subParams.borderColor)) : Color.fromHexStyle("#000000"),
+          background: false
+          // Removes the default dark box
+        }));
+        await plugin.state.data.updateTree(update).run();
+      }
     }
   };
 })();
