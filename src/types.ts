@@ -48,6 +48,8 @@ export interface CustomRule {
   element: string;
   atomIndex: string;
   label: string;
+  labelSize?: string;
+  labelTextColor?: string;
   labelBorderWidth?: string;
   labelBorderColor?: string;
   tooltip: string;

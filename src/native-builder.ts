@@ -378,9 +378,10 @@ export const NativeBuilder = {
       update.to(newLabelCell.transform.ref).update((oldParams: any) => ({
         ...oldParams,
         customText: rule.label,
-        sizeFactor: rule.size ? parseFloat(rule.size) : 1,
-        borderWidth: rule.labelBorderWidth ? parseFloat(rule.labelBorderWidth) : 0.2,
-        borderColor: Color.fromHexStyle(rule.labelBorderColor || '#000000'),
+        sizeFactor: rule.labelSize ? parseFloat(rule.labelSize) : 1,
+        textColor: Color.fromHexStyle(String(rule.labelTextColor || '#ffffff')),
+        borderWidth: rule.labelBorderWidth ? parseFloat(String(rule.labelBorderWidth)) : 0.2,
+        borderColor: Color.fromHexStyle(String(rule.labelBorderColor || '#000000')),
         background: false 
       }));
       

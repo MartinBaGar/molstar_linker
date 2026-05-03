@@ -234,7 +234,8 @@ function addCustomRuleCard(ruleData?: Partial<CustomRule>): void {
     name: 'New Rule', rep: 'highlight', colorType: 'solid', colorVal: 'red',
     size: '', opacity: '', mode: 'simple', scheme: 'auth',
     chain: '', ranges: '', specific: '', atomName: '', element: '', atomIndex: '',
-    label: '', labelBorderWidth: '0.2', labelBorderColor: '#000000', tooltip: '', focus: false,
+    label: '', labelTextColor: '#000000', labelSize: '1.0',
+    labelBorderWidth: '0.2', labelBorderColor: '#000000', tooltip: '', focus: false,
     rawJson: '{"auth_asym_id":"A"}', rawParamsJson: '{}', subParams: {},
     ...(ruleData ?? {}),
   };
@@ -341,13 +342,23 @@ function addCustomRuleCard(ruleData?: Partial<CustomRule>): void {
             <label>Floating 3D Label</label>
             <input type="text" class="cr-label" value="${escapeHTML(data.label)}" placeholder="e.g. Active Site">
           </div>
-          <div style="flex:1">
+          <div style="flex:0.8">
+            <label>Text Size</label>
+            <input type="number" class="cr-label-size" value="${escapeHTML(data.labelSize || '1.0')}" step="0.1" min="0.1" max="5.0" placeholder="1.0">
+          </div>
+          <div style="flex:0.8">
+            <label>Text Color</label>
+            <div style="display:flex; align-items:center;">
+               <input type="color" class="cr-label-text-color" value="${escapeHTML(data.labelTextColor || '#ffffff')}" style="height:26px; padding:0; cursor:pointer;">
+            </div>
+          </div>
+          <div style="flex:0.8">
             <label>Border Size</label>
             <input type="number" class="cr-label-border-width" value="${escapeHTML(data.labelBorderWidth)}" step="0.1" min="0" max="1.0" placeholder="0.2">
           </div>
-          <div style="flex:1">
+          <div style="flex:0.8">
             <label>Border Color</label>
-            <div style="display:flex; align-items:center; gap:5px;">
+            <div style="display:flex; align-items:center;">
                <input type="color" class="cr-label-border-color" value="${escapeHTML(data.labelBorderColor)}" style="height:26px; padding:0; cursor:pointer;">
             </div>
           </div>
@@ -498,6 +509,8 @@ function extractCurrentSettings(): ExtensionSettings {
       element:      (card.querySelector('.cr-element')     as HTMLInputElement).value.trim(),
       atomIndex:    (card.querySelector('.cr-atom-index')  as HTMLInputElement).value.trim(),
       label:            (card.querySelector('.cr-label')               as HTMLInputElement).value.trim(),
+      labelSize:        (card.querySelector('.cr-label-size')          as HTMLInputElement)?.value || '1.0',
+      labelTextColor:   (card.querySelector('.cr-label-text-color')    as HTMLInputElement)?.value || '#ffffff',
       labelBorderWidth: (card.querySelector('.cr-label-border-width')  as HTMLInputElement)?.value || '0.2',
       labelBorderColor: (card.querySelector('.cr-label-border-color')  as HTMLInputElement)?.value || '#000000',
       tooltip:          (card.querySelector('.cr-tooltip')             as HTMLInputElement).value.trim(),
