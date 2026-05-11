@@ -1,10 +1,9 @@
 // src/cli.ts
 //
-// Phase 1 — CLI Shell
-// Provides the terminal overlay, history navigation, command registry,
-// and built-in commands (help, clear, echo, version).
-// Phase 2 & 3 — Mol* API Integration
-// Read-only and mutating commands using the PyMOL transpiler.
+// Phase 1 — CLI Shell (✓ done)
+// Phase 2 — Read-only commands (✓ done)
+// Phase 3 — Mutating commands (← we are here, using proper helpers)
+// Phase 4 — Linker-specific commands (next)
 
 import { StateSelection } from 'molstar/lib/mol-state';
 import { PluginStateObject as SO } from 'molstar/lib/mol-plugin-state/objects';
@@ -13,6 +12,7 @@ import { Script } from 'molstar/lib/mol-script/script';
 import { Structure, StructureElement, QueryContext, StructureSelection } from 'molstar/lib/mol-model/structure';
 import { Color } from 'molstar/lib/mol-util/color';
 import { ColorNames } from 'molstar/lib/mol-util/color/names';
+import { setStructureOverpaint, clearStructureOverpaint } from 'molstar/lib/mol-plugin-state/helpers/structure-overpaint';
 import type { PluginContext } from 'molstar/lib/mol-plugin/context';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -33,7 +33,7 @@ export interface CliCommand {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HistoryManager
+// HistoryManager (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class HistoryManager {
@@ -84,7 +84,7 @@ class HistoryManager {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CommandRegistry
+// CommandRegistry (unchanged)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class CommandRegistry {
@@ -258,7 +258,7 @@ export class CliEngine {
     });
   }
 
-  // ── Mol* API Commands (Phase 2 & 3) ────────────────────────────────────────
+  // ── PHASE 2: Read-only commands ─────────────────────────────────────────────
 
   public registerMolstarCommands(): void {
 
@@ -332,99 +332,141 @@ export class CliEngine {
       }
     });
 
-this.registry.register({
-      name:        'color',
-      description: 'Color existing representations cleanly without Z-fighting or crashes.',
-      usage:       'color <color_name_or_hex>[, <pymol_expression>]',
+    // ── PHASE 3: Mutating commands ──────────────────────────────────────────
+
+    this.registry.register({
+      name: 'color',
+      aliases: ['col'],
+      description: 'Color a selection using the built-in overpaint system.',
+      usage: 'color <color_name_or_hex> <pymol_expression>',
       async execute(args, plugin) {
-        if (args.length < 2) return { status: 'warn', message: 'Usage: color <color>, <expression>' };
+        if (args.length < 2) {
+          return { status: 'warn', message: 'Usage: color <color> <expression>' };
+        }
 
-        // 1. Handle PyMOL's comma syntax
-        const fullArgs = args.join(' ');
-        const match = fullArgs.match(/^([a-zA-Z0-9#]+),?\s+(.+)$/);
-        if (!match) return { status: 'warn', message: 'Usage: color <color>, <expression>' };
+        // Parse arguments (handle both "red chain A" and "red, chain A")
+        const colorInput = args[0]!;
+        const expression = args.slice(1).join(' ').replace(/^,\s*/, '');
 
-        const colorInput = match[1];
-        const expression = match[2];
+        // Parse color
+        let parsedColor: Color;
         const lowerColor = colorInput.toLowerCase();
 
-        // 2. Parse the color
-        let parsedColor: Color;
         if (lowerColor in ColorNames) {
-            parsedColor = ColorNames[lowerColor as keyof typeof ColorNames];
+          parsedColor = ColorNames[lowerColor as keyof typeof ColorNames];
         } else {
-            const hexMatch = colorInput.match(/^#?([0-9A-Fa-f]{6})$/);
-            if (hexMatch) {
-                parsedColor = Color.fromHexStyle(`#${hexMatch[1]}`);
-            } else {
-                return { status: 'error', message: `Invalid color: "${colorInput}". Use a name (e.g., red) or hex (e.g., #ff0000).` };
-            }
+          const hexMatch = colorInput.match(/^#?([0-9A-Fa-f]{6})$/);
+          if (hexMatch) {
+            parsedColor = Color.fromHexStyle(`#${hexMatch[1]}`);
+          } else {
+            return {
+              status: 'error',
+              message: `Invalid color: "${colorInput}". Use a name (e.g., red) or hex (e.g., #ff0000).`
+            };
+          }
         }
 
-        // 3. Evaluate the selection
+        // Evaluate selection
         const loci = evaluateSelection(plugin, expression);
         if (!loci || StructureElement.Loci.isEmpty(loci)) {
-          return { status: 'error', message: `No atoms matched selection: "${expression}"` };
+          return { status: 'error', message: `No atoms matched: "${expression}"` };
         }
+
+        // Get all structure components to apply color to
+        const structures = plugin.managers.structure.hierarchy.current.structures;
+        if (structures.length === 0) {
+          return { status: 'error', message: 'No structure loaded.' };
+        }
+
+        try {
+          // Collect all representation components
+          const components: any[] = [];
+          for (const hierarchyStructure of structures) {
+            for (const component of hierarchyStructure.components) {
+              if (component.representations && component.representations.length > 0) {
+                components.push(component);
+              }
+            }
+          }
+
+          if (components.length === 0) {
+            return { status: 'warn', message: 'No representations found.' };
+          }
+
+          // Use Molstar's built-in overpaint helper
+          // This handles all the state tree complexity for us
+          await setStructureOverpaint(
+            plugin,
+            components,
+            parsedColor,
+            async (structure) => {
+              // Remap the loci to this component's structure
+              return StructureElement.Loci.remap(loci, structure);
+            }
+          );
+
+          const atomCount = StructureElement.Loci.size(loci);
+          return {
+            status: 'ok',
+            message: `Colored ${atomCount} atoms as ${colorInput}.`
+          };
+
+        } catch (err) {
+          console.error('Color command error:', err);
+          return {
+            status: 'error',
+            message: `Failed to apply color: ${err instanceof Error ? err.message : String(err)}`
+          };
+        }
+      }
+    });
+
+    // Clear colors from a selection
+    this.registry.register({
+      name: 'clearcolor',
+      aliases: ['clr', 'uncolor'],
+      description: 'Remove custom colors from a selection.',
+      usage: 'clearcolor <pymol_expression>',
+      async execute(args, plugin) {
+        if (args.length === 0) {
+          return { status: 'warn', message: 'Usage: clearcolor <expression>' };
+        }
+
+        const expression = args.join(' ');
 
         const structures = plugin.managers.structure.hierarchy.current.structures;
-        if (structures.length === 0) return { status: 'error', message: 'No structure loaded.' };
-
-        // Start a State Update
-        const update = plugin.state.data.build();
-        let appliedCount = 0;
-
-        // 4. Find all active Representation3D nodes in the protein's subtree
-        // This is the safest way to avoid "No suitable parent" errors
-        const structureRef = structures[0].cell.transform.ref;
-        const reprCells = plugin.state.data.select(
-            StateSelection.Generators.byRef(structureRef).subtree().ofType(SO.Molecule.Structure.Representation3D)
-        );
-
-        for (const cell of reprCells) {
-            const reprData = cell.obj?.data;
-            if (!reprData || !reprData.sourceData) continue;
-
-            // Check if our selection actually contains atoms found in this specific representation
-            const lociInRepr = StructureElement.Loci.remap(loci, reprData.sourceData);
-            if (StructureElement.Loci.isEmpty(lociInRepr)) continue;
-
-            const bundle = StructureElement.Bundle.fromLoci(lociInRepr);
-            const repRef = cell.transform.ref;
-            let existingOverpaintRef: string | undefined;
-
-            // Check for existing overpaint decorator
-            const children = plugin.state.data.tree.children.get(repRef);
-            if (children) {
-                for (const childRef of children.values()) {
-                    const childCell = plugin.state.data.cells.get(childRef);
-                    if (childCell && childCell.transform.transformer.id === StateTransforms.Representation.OverpaintStructureRepresentation3DFromBundle.id) {
-                        existingOverpaintRef = childRef;
-                        break;
-                    }
-                }
-            }
-
-            if (existingOverpaintRef) {
-                update.to(existingOverpaintRef).update(old => {
-                    const layers = (old && old.layers) ? [...old.layers] : [];
-                    layers.push({ bundle, color: parsedColor, clear: false });
-                    return { layers };
-                });
-            } else {
-                update.to(repRef).apply(
-                    StateTransforms.Representation.OverpaintStructureRepresentation3DFromBundle,
-                    { layers: [{ bundle, color: parsedColor, clear: false }] }
-                );
-            }
-            appliedCount++;
+        if (structures.length === 0) {
+          return { status: 'error', message: 'No structure loaded.' };
         }
 
-        if (appliedCount > 0) {
-            await update.commit();
-            return { status: 'ok', message: `Colored "${expression}" as ${colorInput}.` };
-        } else {
-            return { status: 'warn', message: 'Selection is valid, but no matching representations were found beneath the structure.' };
+        try {
+          const components: any[] = [];
+          for (const hierarchyStructure of structures) {
+            for (const component of hierarchyStructure.components) {
+              if (component.representations && component.representations.length > 0) {
+                components.push(component);
+              }
+            }
+          }
+
+          if (components.length === 0) {
+            return { status: 'warn', message: 'No representations found.' };
+          }
+
+          // Clear overpaint
+          await clearStructureOverpaint(plugin, components);
+
+          return {
+            status: 'ok',
+            message: `Cleared all custom colors.`
+          };
+
+        } catch (err) {
+          console.error('Clearcolor command error:', err);
+          return {
+            status: 'error',
+            message: `Failed to clear colors: ${err instanceof Error ? err.message : String(err)}`
+          };
         }
       }
     });
@@ -697,16 +739,9 @@ function evaluateSelection(plugin: PluginContext, expression: string): Structure
   if (!structureData) return null;
 
   try {
-    // 1. Tell Script we are parsing PyMOL syntax
     const script = Script(expression, 'pymol');
-
-    // 2. Convert it to a MolScript Query
     const query = Script.toQuery(script);
-
-    // 3. Evaluate the query against the current structure data
     const selection = query(new QueryContext(structureData));
-
-    // 4. Return the explicit Loci (atoms) matched
     return StructureSelection.toLociWithSourceUnits(selection);
   } catch (err) {
     console.error('PyMOL parse error:', err);

@@ -672,6 +672,13 @@
       return out;
     }
     Vec32.div = div;
+    function mod(out, a, b) {
+      out[0] = a[0] % b[0];
+      out[1] = a[1] % b[1];
+      out[2] = a[2] % b[2];
+      return out;
+    }
+    Vec32.mod = mod;
     function scale(out, a, b) {
       out[0] = a[0] * b;
       out[1] = a[1] * b;
@@ -1004,6 +1011,18 @@
       return Mat4.fromRotation(mat, by, axis);
     }
     Vec32.makeRotation = makeRotation;
+    const tmpCrossAxis = Vec32();
+    function rotateAroundAxis(out, v, axis, angle2) {
+      const cos = Math.cos(angle2);
+      const sin = Math.sin(angle2);
+      const dot2 = Vec32.dot(v, axis);
+      Vec32.cross(tmpCrossAxis, axis, v);
+      out[0] = v[0] * cos + tmpCrossAxis[0] * sin + axis[0] * dot2 * (1 - cos);
+      out[1] = v[1] * cos + tmpCrossAxis[1] * sin + axis[1] * dot2 * (1 - cos);
+      out[2] = v[2] * cos + tmpCrossAxis[2] * sin + axis[2] * dot2 * (1 - cos);
+      return out;
+    }
+    Vec32.rotateAroundAxis = rotateAroundAxis;
     function isZero(v) {
       return v[0] === 0 && v[1] === 0 && v[2] === 0;
     }
@@ -2646,11 +2665,10 @@
       Vec3.normalize(tangent0, tangent0);
       const tangent1 = Vec3.cross(_v3pb, normal, tangent0);
       Vec3.normalize(tangent1, tangent1);
-      setAxes(out, normal, tangent0, tangent1);
+      fromBasis(out, tangent0, tangent1, normal);
       out[12] = point[0];
       out[13] = point[1];
       out[14] = point[2];
-      out[15] = 1;
       return out;
     }
     Mat42.fromPlane = fromPlane;
@@ -3391,6 +3409,201 @@
       return (xs) => reorder(xs, indices);
     }
     Tensor2.convertToCanonicalAxisIndicesSlowToFast = convertToCanonicalAxisIndicesSlowToFast;
+    function floodfill1(tensor, threshold) {
+      const [xn] = tensor.space.dimensions;
+      const { data } = tensor;
+      const visited = new Uint8Array(data.length);
+      let leftEnd = -1;
+      if (data[0] < threshold) {
+        for (let x = 0; x < xn && data[x] < threshold; x++) {
+          visited[x] = 1;
+          leftEnd = x;
+        }
+      }
+      if (data[xn - 1] < threshold) {
+        for (let x = xn - 1; x > leftEnd && data[x] < threshold; x--) {
+          visited[x] = 1;
+        }
+      }
+      return visited;
+    }
+    function floodfill2(tensor, threshold) {
+      const [xn, yn] = tensor.space.dimensions;
+      const { dataOffset: o, getCoords: getCoords2 } = tensor.space;
+      const { data } = tensor;
+      const visited = new Uint8Array(data.length);
+      const stack = [];
+      const coords = [0, 0];
+      const xn1 = xn - 1;
+      const yn1 = yn - 1;
+      const isBoundary = (x, y) => x === 0 || y === 0 || x === xn1 || y === yn1;
+      for (let y = 0; y < yn; y++) {
+        for (let x = 0; x < xn; x++) {
+          const offset2 = o(x, y);
+          if (!visited[offset2] && data[offset2] < threshold && isBoundary(x, y)) {
+            stack.push(offset2);
+            while (stack.length > 0) {
+              const voffset = stack.pop();
+              if (visited[voffset])
+                continue;
+              visited[voffset] = 1;
+              getCoords2(voffset, coords);
+              const [vx, vy] = coords;
+              if (vx > 0) {
+                const noffset = o(vx - 1, vy);
+                if (!visited[noffset] && data[noffset] < threshold) {
+                  stack.push(noffset);
+                }
+              }
+              if (vx < xn1) {
+                const noffset = o(vx + 1, vy);
+                if (!visited[noffset] && data[noffset] < threshold) {
+                  stack.push(noffset);
+                }
+              }
+              if (vy > 0) {
+                const noffset = o(vx, vy - 1);
+                if (!visited[noffset] && data[noffset] < threshold) {
+                  stack.push(noffset);
+                }
+              }
+              if (vy < yn1) {
+                const noffset = o(vx, vy + 1);
+                if (!visited[noffset] && data[noffset] < threshold) {
+                  stack.push(noffset);
+                }
+              }
+            }
+          }
+        }
+      }
+      return visited;
+    }
+    function floodfill3(tensor, threshold) {
+      const [xn, yn, zn] = tensor.space.dimensions;
+      const { dataOffset: o, getCoords: getCoords2 } = tensor.space;
+      const stack = [];
+      const coords = [0, 0, 0];
+      const xn1 = xn - 1;
+      const yn1 = yn - 1;
+      const zn1 = zn - 1;
+      const isBoundary = (x, y, z) => x === 0 || y === 0 || z === 0 || x === xn1 || y === yn1 || z === zn1;
+      const { data } = tensor;
+      const visited = new Uint8Array(data.length);
+      for (let z = 0; z < zn; z++) {
+        for (let y = 0; y < yn; y++) {
+          for (let x = 0; x < xn; x++) {
+            const offset2 = o(x, y, z);
+            if (data[offset2] < threshold && isBoundary(x, y, z) && !visited[offset2]) {
+              stack.push(offset2);
+              while (stack.length > 0) {
+                const voffset = stack.pop();
+                if (visited[voffset])
+                  continue;
+                visited[voffset] = 1;
+                getCoords2(voffset, coords);
+                const [vx, vy, vz] = coords;
+                if (vx > 0) {
+                  const noffset = o(vx - 1, vy, vz);
+                  if (!visited[noffset] && data[noffset] < threshold) {
+                    stack.push(noffset);
+                  }
+                }
+                if (vx < xn1) {
+                  const noffset = o(vx + 1, vy, vz);
+                  if (!visited[noffset] && data[noffset] < threshold) {
+                    stack.push(noffset);
+                  }
+                }
+                if (vy > 0) {
+                  const noffset = o(vx, vy - 1, vz);
+                  if (!visited[noffset] && data[noffset] < threshold) {
+                    stack.push(noffset);
+                  }
+                }
+                if (vy < yn1) {
+                  const noffset = o(vx, vy + 1, vz);
+                  if (!visited[noffset] && data[noffset] < threshold) {
+                    stack.push(noffset);
+                  }
+                }
+                if (vz > 0) {
+                  const noffset = o(vx, vy, vz - 1);
+                  if (!visited[noffset] && data[noffset] < threshold) {
+                    stack.push(noffset);
+                  }
+                }
+                if (vz < zn1) {
+                  const noffset = o(vx, vy, vz + 1);
+                  if (!visited[noffset] && data[noffset] < threshold) {
+                    stack.push(noffset);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      return visited;
+    }
+    function floodfill(tensor, threshold) {
+      switch (tensor.space.dimensions.length) {
+        case 1:
+          return floodfill1(tensor, threshold);
+        case 2:
+          return floodfill2(tensor, threshold);
+        case 3:
+          return floodfill3(tensor, threshold);
+        default:
+          throw new Error("Floodfill only implemented for rank-1, rank-2 and rank-3 tensors.");
+      }
+    }
+    Tensor2.floodfill = floodfill;
+    function floodfilledGet(mode, threshold, visited, tensor) {
+      const { dataOffset: o } = tensor.space;
+      const fillValue = threshold * 2;
+      switch (tensor.space.dimensions.length) {
+        case 1:
+          return mode === "outside" ? (data, i) => {
+            const v = data[i];
+            return v < threshold && visited[i] ? fillValue : v;
+          } : (data, i) => {
+            const v = data[i];
+            return v < threshold && !visited[i] ? fillValue : v;
+          };
+        case 2:
+          return mode === "outside" ? (data, i, j) => {
+            const e = o(i, j);
+            const v = data[e];
+            return v < threshold && visited[e] ? fillValue : v;
+          } : (data, i, j) => {
+            const e = o(i, j);
+            const v = data[e];
+            return v < threshold && !visited[e] ? fillValue : v;
+          };
+        case 3:
+          return mode === "outside" ? (data, i, j, k) => {
+            const e = o(i, j, k);
+            const v = data[e];
+            return v < threshold && visited[e] ? fillValue : v;
+          } : (data, i, j, k) => {
+            const e = o(i, j, k);
+            const v = data[e];
+            return v < threshold && !visited[e] ? fillValue : v;
+          };
+        default:
+          throw new Error("Floodfill only implemented for rank-1, rank-2 and rank-3 tensors.");
+      }
+    }
+    function createFloodfilled(tensor, threshold, mode) {
+      const visited = floodfill(tensor, threshold);
+      const newSpace = {
+        ...tensor.space,
+        get: floodfilledGet(mode, threshold, visited, tensor)
+      };
+      return Tensor2.create(newSpace, tensor.data);
+    }
+    Tensor2.createFloodfilled = createFloodfilled;
   })(Tensor || (Tensor = {}));
 
   // node_modules/molstar/lib/mol-io/reader/common/text/number-parser.js
@@ -10078,67 +10291,6 @@
     return i === void 0 ? DefaultAtomNumber : i;
   }
 
-  // node_modules/molstar/lib/mol-model/custom-property.js
-  function CustomPropertyDescriptor(desc) {
-    return desc;
-  }
-  (function(CustomPropertyDescriptor2) {
-    function getUUID(prop) {
-      if (!prop.__key) {
-        prop.__key = UUID.create22();
-      }
-      return prop.__key;
-    }
-    CustomPropertyDescriptor2.getUUID = getUUID;
-  })(CustomPropertyDescriptor || (CustomPropertyDescriptor = {}));
-  var CustomProperties = class {
-    constructor() {
-      this._list = [];
-      this._set = /* @__PURE__ */ new Set();
-      this._refs = /* @__PURE__ */ new Map();
-      this._assets = /* @__PURE__ */ new Map();
-    }
-    get all() {
-      return this._list;
-    }
-    add(desc) {
-      if (this._set.has(desc))
-        return;
-      this._list.push(desc);
-      this._set.add(desc);
-    }
-    reference(desc, add) {
-      let refs = this._refs.get(desc) || 0;
-      refs += add ? 1 : -1;
-      this._refs.set(desc, Math.max(refs, 0));
-    }
-    hasReference(desc) {
-      return (this._refs.get(desc) || 0) > 0;
-    }
-    has(desc) {
-      return this._set.has(desc);
-    }
-    /** Sets assets for a prop, disposes of existing assets for that prop */
-    assets(desc, assets) {
-      const prevAssets = this._assets.get(desc);
-      if (prevAssets) {
-        for (const a of prevAssets)
-          a.dispose();
-      }
-      if (assets)
-        this._assets.set(desc, assets);
-      else
-        this._assets.delete(desc);
-    }
-    /** Disposes of all assets of all props */
-    dispose() {
-      this._assets.forEach((assets) => {
-        for (const a of assets)
-          a.dispose();
-      });
-    }
-  };
-
   // node_modules/molstar/lib/mol-math/linear-algebra/3d/vec2.js
   function Vec2() {
     return Vec2.zero();
@@ -14252,7 +14404,7 @@ ${subTree.join("\n")}`;
   })(ColorScale || (ColorScale = {}));
 
   // node_modules/molstar/lib/mol-model/structure/model/types/saccharides.js
-  var SaccharideNames = /* @__PURE__ */ new Set(["145", "147", "149", "289", "291", "293", "445", "475", "491", "510", "604", "045", "05L", "07E", "07Y", "08U", "09X", "0AT", "0BD", "0H0", "0HX", "0LP", "0MK", "0NZ", "0TS", "0UB", "0V4", "0WK", "0XY", "0YT", "10M", "12E", "14T", "15L", "16F", "16G", "16O", "17T", "18D", "18O", "18T", "1AR", "1BW", "1CF", "1FT", "1GL", "1GN", "1JB", "1LL", "1NA", "1S3", "1S4", "1SD", "1X4", "20S", "20X", "22O", "22S", "23V", "24S", "25E", "26M", "26O", "26Q", "26R", "26V", "26W", "26Y", "27C", "2DG", "2DR", "2F8", "2FG", "2FL", "2FP", "2GL", "2GS", "2H5", "2HA", "2M4", "2M5", "2M8", "2OS", "2SI", "2WP", "2WS", "32O", "34V", "38J", "3BU", "3CM", "3DO", "3DY", "3FM", "3GR", "3HD", "3J3", "3J4", "3LJ", "3LR", "3MF", "3MG", "3MK", "3R3", "3S6", "3SA", "3YW", "40J", "42D", "44S", "46D", "46M", "46Z", "48Z", "49A", "49S", "49T", "49V", "4AM", "4CQ", "4GC", "4GL", "4GP", "4JA", "4N2", "4NN", "4QY", "4R1", "4RS", "4SG", "4U0", "4U1", "4U2", "4UZ", "4V5", "50A", "51N", "56N", "57S", "5DI", "5GF", "5GO", "5II", "5KQ", "5KS", "5KT", "5KV", "5L2", "5L3", "5LS", "5LT", "5MM", "5N6", "5QP", "5RP", "5SA", "5SP", "5TH", "5TJ", "5TK", "5TM", "61J", "62I", "64K", "66O", "6BG", "6C2", "6DM", "6GB", "6GP", "6GR", "6K3", "6KH", "6KL", "6KS", "6KU", "6KW", "6LA", "6LS", "6LW", "6MJ", "6MN", "6PG", "6PY", "6PZ", "6S2", "6SA", "6UD", "6Y6", "6YR", "6ZC", "73E", "79J", "7CV", "7D1", "7GP", "7JZ", "7K2", "7K3", "7NU", "7SA", "83Y", "89Y", "8B7", "8B9", "8EX", "8GA", "8GG", "8GP", "8I4", "8LM", "8LR", "8OQ", "8PK", "8S0", "8YV", "95Z", "96O", "98U", "9AM", "9C1", "9CD", "9GP", "9KJ", "9MR", "9OK", "9PG", "9QG", "9QZ", "9RN", "9S7", "9SG", "9SJ", "9SM", "9SP", "9T1", "9T7", "9VP", "9WJ", "9WN", "9WZ", "9YW", "A0K", "A1AIO", "A1APB", "A1APC", "A1APD", "A1CCV", "A1CCW", "A1EAX", "A1EFW", "A1EGT", "A1EGV", "A1EGW", "A1EGX", "A1EGY", "A1EJ0", "A1EJ2", "A1EKO", "A1EN6", "A1H03", "A1H0P", "A1H0Z", "A1H10", "A1H1B", "A1H1F", "A1H1V", "A1I9U", "A1ID6", "A1IH4", "A1IZL", "A1JAQ", "A1L1P", "A1Q", "A2G", "A5C", "A6P", "AAL", "AAO", "ABC", "ABD", "ABE", "ABF", "ABL", "AC1", "ACG", "ACR", "ACX", "ADA", "ADG", "ADR", "AF1", "AFD", "AFL", "AFO", "AFP", "AFR", "AGC", "AGH", "AGL", "AGR", "AH2", "AH8", "AHG", "AHM", "AHR", "AIG", "ALL", "ALX", "AMG", "AMN", "AMU", "AMV", "ANA", "AOG", "AOS", "AQA", "ARA", "ARB", "ARE", "ARI", "ARW", "ASC", "ASG", "ASO", "AXP", "AXR", "AY9", "AZC", "B0D", "B16", "B1H", "B1N", "B2G", "B4G", "B6D", "B7G", "B8D", "B9D", "BBK", "BBV", "BCD", "BCW", "BDF", "BDG", "BDP", "BDR", "BDZ", "BEM", "BFN", "BFP", "BG6", "BG8", "BGC", "BGL", "BGN", "BGP", "BGS", "BHG", "BM3", "BM7", "BMA", "BMX", "BND", "BNG", "BNX", "BO1", "BOG", "BQY", "BRI", "BS7", "BTG", "BTU", "BW3", "BWG", "BXF", "BXP", "BXX", "BXY", "BZD", "C3B", "C3G", "C3X", "C4B", "C4W", "C4X", "C5X", "CAP", "CBF", "CBI", "CBK", "CDR", "CE5", "CE6", "CE8", "CEG", "CEX", "CEY", "CEZ", "CGF", "CJB", "CKB", "CKP", "CNP", "CR1", "CR6", "CRA", "CT3", "CTO", "CTR", "CTT", "D0N", "D1M", "D5E", "D6G", "DAF", "DAG", "DAN", "DDA", "DDB", "DDL", "DEG", "DEL", "DFR", "DFX", "DG0", "DGC", "DGD", "DGM", "DGO", "DGS", "DGU", "DIG", "DJB", "DJE", "DK4", "DKX", "DKZ", "DL6", "DLD", "DLF", "DLG", "DMU", "DNO", "DO8", "DOM", "DP5", "DPC", "DQQ", "DQR", "DR2", "DR3", "DR4", "DR5", "DRI", "DSR", "DT6", "DVC", "DYM", "E3M", "E4P", "E5G", "EAG", "EBG", "EBQ", "ED6", "EEN", "EEQ", "EGA", "EJT", "EMP", "EMZ", "EPG", "EQP", "EQV", "ERE", "ERI", "ETT", "EUS", "F1P", "F1X", "F55", "F58", "F6P", "F8X", "FBP", "FCA", "FCB", "FCT", "FDP", "FDQ", "FFC", "FFX", "FIF", "FIX", "FK9", "FKD", "FMF", "FMO", "FNG", "FNY", "FRU", "FSA", "FSI", "FSM", "FSR", "FSW", "FU4", "FUB", "FUC", "FUD", "FUF", "FUL", "FUY", "FVQ", "FX1", "FYJ", "G0S", "G16", "G1P", "G20", "G28", "G2F", "G3F", "G3I", "G4D", "G4S", "G6D", "G6P", "G6S", "G7P", "G8Z", "GAA", "GAC", "GAD", "GAF", "GAL", "GAT", "GBH", "GC1", "GC4", "GC9", "GCB", "GCD", "GCN", "GCO", "GCS", "GCT", "GCU", "GCV", "GCW", "GDA", "GDL", "GE1", "GE3", "GFP", "GIV", "GL0", "GL1", "GL2", "GL4", "GL5", "GL6", "GL7", "GL9", "GLA", "GLB", "GLC", "GLD", "GLF", "GLG", "GLO", "GLP", "GLS", "GLT", "GLW", "GM0", "GMB", "GMH", "GMT", "GMZ", "GN1", "GN4", "GNS", "GNX", "GP0", "GP1", "GP4", "GPH", "GPK", "GPM", "GPO", "GPQ", "GPU", "GPV", "GPW", "GQ1", "GRF", "GRX", "GS1", "GS4", "GS9", "GSA", "GSD", "GTE", "GTH", "GTK", "GTM", "GTR", "GU0", "GU1", "GU2", "GU3", "GU4", "GU5", "GU6", "GU8", "GU9", "GUF", "GUL", "GUP", "GUZ", "GXL", "GXV", "GYE", "GYG", "GYP", "GYU", "GYV", "GZL", "H1M", "H1S", "H2P", "H3S", "H53", "H6Q", "H6Z", "HBZ", "HD4", "HDL", "HLA", "HMS", "HNV", "HNW", "HSG", "HSH", "HSJ", "HSQ", "HSR", "HSU", "HSX", "HSY", "HSZ", "HTG", "HTM", "HVC", "I57", "IAB", "IDC", "IDF", "IDG", "IDR", "IDS", "IDT", "IDU", "IDX", "IDY", "IEM", "IN1", "IPT", "ISD", "ISL", "ISX", "IVG", "IXD", "J5B", "JFZ", "JHM", "JLT", "JRV", "JS2", "JSV", "JV4", "JVA", "JVS", "JZR", "K5B", "K99", "KBA", "KBG", "KD5", "KDA", "KDB", "KDD", "KDE", "KDF", "KDM", "KDN", "KDO", "KDR", "KFN", "KG1", "KGM", "KHP", "KME", "KO1", "KO2", "KOT", "KQC", "KTU", "L1L", "L6N", "L6S", "L6T", "LAG", "LAH", "LAI", "LAK", "LAO", "LAT", "LB2", "LBS", "LBT", "LCN", "LDY", "LEC", "LER", "LFC", "LFR", "LGC", "LGU", "LKA", "LKS", "LM2", "LMO", "LMT", "LMU", "LNV", "LOG", "LOX", "LPK", "LRH", "LSM", "LTG", "LTM", "LVO", "LVZ", "LXB", "LXC", "LXZ", "LZ0", "M1F", "M1P", "M2F", "M3M", "M3N", "M55", "M6D", "M6P", "M7B", "M7P", "M8C", "MA1", "MA2", "MA3", "MA8", "MAB", "MAF", "MAG", "MAL", "MAN", "MAT", "MAV", "MAW", "MBE", "MBF", "MBG", "MCU", "MDA", "MDP", "MFA", "MFB", "MFU", "MG5", "MGA", "MGC", "MGL", "MGS", "MJJ", "MLB", "MLR", "MMA", "MMN", "MN0", "MNA", "MQG", "MQT", "MRH", "MRP", "MSX", "MTT", "MUB", "MUG", "MUR", "MVP", "MXY", "MXZ", "MYG", "N1L", "N3U", "N9S", "NA1", "NAA", "NAG", "NBG", "NBX", "NBY", "NDG", "NED", "NFG", "NG1", "NG6", "NGA", "NGB", "NGC", "NGE", "NGF", "NGK", "NGL", "NGR", "NGS", "NGY", "NGZ", "NHF", "NLC", "NM6", "NM9", "NNG", "NOJ", "NPF", "NSQ", "NT1", "NTF", "NTO", "NTP", "NXD", "NYT", "O1G", "OAK", "OEL", "OI7", "OPM", "ORP", "OSU", "OTG", "OTN", "OTU", "OX2", "P53", "P6P", "P8E", "PA1", "PA5", "PAV", "PDX", "PH5", "PKM", "PNA", "PNG", "PNJ", "PNW", "PPC", "PRP", "PSG", "PSJ", "PSV", "PTQ", "PUF", "PZU", "QDK", "QIF", "QKH", "QPS", "QV4", "R1P", "R1X", "R2B", "R2G", "R5P", "RAA", "RAE", "RAF", "RAM", "RAO", "RAT", "RB5", "RBL", "RCD", "RDP", "REL", "RER", "RF5", "RG1", "RGG", "RHA", "RHC", "RI2", "RIB", "RIP", "RM4", "RNS", "RNT", "ROB", "ROR", "RP3", "RP5", "RP6", "RPA", "RR7", "RRJ", "RRY", "RST", "RTG", "RTV", "RUB", "RUG", "RUU", "RV7", "RVG", "RVM", "RWI", "RY7", "RZM", "S6P", "S7P", "S81", "SA0", "SCG", "SCR", "SDD", "SDY", "SEJ", "SF6", "SF9", "SFJ", "SFU", "SG4", "SG5", "SG6", "SG7", "SGA", "SGC", "SGD", "SGN", "SGS", "SHB", "SHD", "SHG", "SI3", "SIA", "SID", "SIO", "SIZ", "SLB", "SLM", "SLT", "SMD", "SN5", "SNG", "SOE", "SOG", "SOL", "SOR", "SR1", "SSG", "SSH", "STW", "STZ", "SUC", "SUP", "SUS", "SWE", "SZZ", "T68", "T6D", "T6P", "T6T", "TA6", "TAG", "TCB", "TCG", "TDG", "TEU", "TF0", "TFU", "TGA", "TGK", "TGR", "TGY", "TH1", "TM5", "TM6", "TM9", "TMR", "TMX", "TNX", "TOA", "TOC", "TQY", "TRE", "TRV", "TS8", "TT7", "TTV", "TTZ", "TU4", "TUG", "TUJ", "TUP", "TUR", "TVD", "TVG", "TVM", "TVS", "TVV", "TVY", "TW7", "TWA", "TWD", "TWG", "TWJ", "TWY", "TXB", "TY6", "TYV", "U1Y", "U2A", "U2D", "U63", "U8V", "U97", "U9A", "U9D", "U9G", "U9J", "U9M", "UAP", "UBH", "UBO", "UCD", "UDC", "UEA", "V3M", "V3P", "V71", "VDF", "VG1", "VJ1", "VJ4", "VKN", "VTB", "W9T", "WIA", "WKO", "WKT", "WOO", "WT8", "WUN", "WZ1", "WZ2", "WZ4", "X0X", "X1P", "X1X", "X2F", "X2Y", "X34", "X4S", "X5S", "X6N", "X6X", "X6Y", "X6Z", "XBP", "XDP", "XDX", "XGP", "XIL", "XIQ", "XKJ", "XLF", "XLS", "XMM", "XS2", "XUL", "XXM", "XXR", "XXX", "XY6", "XY9", "XYB", "XYF", "XYL", "XYP", "XYS", "XYT", "XYZ", "YDR", "YIO", "YJM", "YKR", "YO5", "YX0", "YX1", "YYB", "YYD", "YYH", "YYJ", "YYK", "YYM", "YYQ", "YYR", "YZ0", "YZT", "Z0F", "Z15", "Z16", "Z2D", "Z2T", "Z3K", "Z3L", "Z3Q", "Z3U", "Z4K", "Z4R", "Z4S", "Z4U", "Z4V", "Z4W", "Z4Y", "Z57", "Z5J", "Z5L", "Z61", "Z6G", "Z6H", "Z6J", "Z6W", "Z8H", "Z8T", "Z9D", "Z9E", "Z9H", "Z9K", "Z9L", "Z9M", "Z9N", "Z9W", "ZB0", "ZB1", "ZB2", "ZB3", "ZCD", "ZCZ", "ZD0", "ZDC", "ZDM", "ZDO", "ZEE", "ZEL", "ZGE", "ZMR", "UMQ", "SQD"]);
+  var SaccharideNames = /* @__PURE__ */ new Set(["145", "147", "149", "289", "291", "293", "445", "475", "491", "510", "604", "045", "05L", "07E", "07Y", "08U", "09X", "0AT", "0BD", "0H0", "0HX", "0LP", "0MK", "0NZ", "0TS", "0UB", "0V4", "0WK", "0XY", "0YT", "10M", "12E", "14T", "15L", "16F", "16G", "16O", "17T", "18D", "18O", "18T", "1AR", "1BW", "1CF", "1FT", "1GL", "1GN", "1JB", "1LL", "1NA", "1S3", "1S4", "1SD", "1X4", "20S", "20X", "22O", "22S", "23V", "24S", "25E", "26M", "26O", "26Q", "26R", "26V", "26W", "26Y", "27C", "2DG", "2DR", "2F8", "2FG", "2FL", "2FP", "2GL", "2GS", "2H5", "2HA", "2M4", "2M5", "2M8", "2OS", "2SI", "2WP", "2WS", "32O", "34V", "38J", "3BU", "3CM", "3DO", "3DY", "3FM", "3GR", "3HD", "3J3", "3J4", "3LJ", "3LR", "3MF", "3MG", "3MK", "3R3", "3S6", "3SA", "3YW", "40J", "42D", "44S", "46D", "46M", "46Z", "48Z", "49A", "49S", "49T", "49V", "4AM", "4CQ", "4GC", "4GL", "4GP", "4JA", "4N2", "4NN", "4QY", "4R1", "4RS", "4SG", "4U0", "4U1", "4U2", "4UZ", "4V5", "50A", "51N", "56N", "57S", "5DI", "5GF", "5GO", "5II", "5KQ", "5KS", "5KT", "5KV", "5L2", "5L3", "5LS", "5LT", "5MM", "5N6", "5QP", "5RP", "5SA", "5SP", "5TH", "5TJ", "5TK", "5TM", "61J", "62I", "64K", "66O", "6BG", "6C2", "6DM", "6GB", "6GP", "6GR", "6K3", "6KH", "6KL", "6KS", "6KU", "6KW", "6LA", "6LS", "6LW", "6MJ", "6MN", "6PG", "6PY", "6PZ", "6S2", "6SA", "6UD", "6Y6", "6YR", "6ZC", "73E", "79J", "7CV", "7D1", "7GP", "7JZ", "7K2", "7K3", "7NU", "7SA", "83Y", "89Y", "8B7", "8B9", "8EX", "8GA", "8GG", "8GP", "8I4", "8LM", "8LR", "8OQ", "8PK", "8S0", "8YV", "95Z", "96O", "98U", "9AM", "9C1", "9CD", "9GP", "9KJ", "9MR", "9OK", "9PG", "9QG", "9QZ", "9RN", "9S7", "9SG", "9SJ", "9SM", "9SP", "9T1", "9T7", "9VP", "9WJ", "9WN", "9WZ", "9YW", "A0K", "A1AIO", "A1APB", "A1APC", "A1APD", "A1CCV", "A1CCW", "A1CWR", "A1EAX", "A1EFW", "A1EGT", "A1EGV", "A1EGW", "A1EGX", "A1EGY", "A1EJ0", "A1EJ2", "A1EKO", "A1EN6", "A1H03", "A1H0P", "A1H0Z", "A1H10", "A1H1B", "A1H1F", "A1H1V", "A1I0L", "A1I9U", "A1ID6", "A1IH4", "A1IVP", "A1IZL", "A1JAQ", "A1L1P", "A1Q", "A2G", "A5C", "A6P", "AAL", "AAO", "ABC", "ABD", "ABE", "ABF", "ABL", "AC1", "ACG", "ACR", "ACX", "ADA", "ADG", "ADR", "AF1", "AFD", "AFL", "AFO", "AFP", "AFR", "AGC", "AGH", "AGL", "AGR", "AH2", "AH8", "AHG", "AHM", "AHR", "AIG", "ALL", "ALX", "AMG", "AMN", "AMU", "AMV", "ANA", "AOG", "AOS", "AQA", "ARA", "ARB", "ARE", "ARI", "ARW", "ASC", "ASG", "ASO", "AXP", "AXR", "AY9", "AZC", "B0D", "B16", "B1H", "B1N", "B2G", "B4G", "B6D", "B7G", "B8D", "B9D", "BBK", "BBV", "BCD", "BCW", "BDF", "BDG", "BDP", "BDR", "BDZ", "BEM", "BFN", "BFP", "BG6", "BG8", "BGC", "BGL", "BGN", "BGP", "BGS", "BHG", "BM3", "BM7", "BMA", "BMX", "BND", "BNG", "BNX", "BO1", "BOG", "BQY", "BRI", "BS7", "BTG", "BTU", "BW3", "BWG", "BXF", "BXP", "BXX", "BXY", "BZD", "C3B", "C3G", "C3X", "C4B", "C4W", "C4X", "C5X", "CAP", "CBF", "CBI", "CBK", "CDR", "CE5", "CE6", "CE8", "CEG", "CEX", "CEY", "CEZ", "CGF", "CJB", "CKB", "CKP", "CNP", "CR1", "CR6", "CRA", "CT3", "CTO", "CTR", "CTT", "D0N", "D1M", "D5E", "D6G", "DAF", "DAG", "DAN", "DDA", "DDB", "DDL", "DEG", "DEL", "DFR", "DFX", "DG0", "DGC", "DGD", "DGM", "DGO", "DGS", "DGU", "DIG", "DJB", "DJE", "DK4", "DKX", "DKZ", "DL6", "DLD", "DLF", "DLG", "DMU", "DNO", "DO8", "DOM", "DP5", "DPC", "DQQ", "DQR", "DR2", "DR3", "DR4", "DR5", "DRI", "DSR", "DT6", "DVC", "DYM", "E3M", "E4P", "E5G", "EAG", "EBG", "EBQ", "ED6", "EEN", "EEQ", "EGA", "EJT", "EMP", "EMZ", "EPG", "EQP", "EQV", "ERE", "ERI", "ETT", "EUS", "F1P", "F1X", "F55", "F58", "F6P", "F8X", "FBP", "FCA", "FCB", "FCT", "FDP", "FDQ", "FFC", "FFX", "FIF", "FIX", "FK9", "FKD", "FMF", "FMO", "FNG", "FNY", "FRU", "FSA", "FSI", "FSM", "FSR", "FSW", "FU4", "FUB", "FUC", "FUD", "FUF", "FUL", "FUY", "FVQ", "FX1", "FYJ", "G0S", "G16", "G1P", "G20", "G28", "G2F", "G3F", "G3I", "G4D", "G4S", "G6D", "G6P", "G6S", "G7P", "G8Z", "GAA", "GAC", "GAD", "GAF", "GAL", "GAT", "GBH", "GC1", "GC4", "GC9", "GCB", "GCD", "GCN", "GCO", "GCS", "GCT", "GCU", "GCV", "GCW", "GDA", "GDL", "GE1", "GE3", "GFP", "GIV", "GL0", "GL1", "GL2", "GL4", "GL5", "GL6", "GL7", "GL9", "GLA", "GLB", "GLC", "GLD", "GLF", "GLG", "GLO", "GLP", "GLS", "GLT", "GLW", "GM0", "GMB", "GMH", "GMT", "GMZ", "GN1", "GN4", "GNS", "GNX", "GP0", "GP1", "GP4", "GPH", "GPK", "GPM", "GPO", "GPQ", "GPU", "GPV", "GPW", "GQ1", "GRF", "GRX", "GS1", "GS4", "GS9", "GSA", "GSD", "GTE", "GTH", "GTK", "GTM", "GTR", "GU0", "GU1", "GU2", "GU3", "GU4", "GU5", "GU6", "GU8", "GU9", "GUF", "GUL", "GUP", "GUZ", "GXL", "GXV", "GYE", "GYG", "GYP", "GYU", "GYV", "GZL", "H1M", "H1S", "H2P", "H3S", "H53", "H6Q", "H6Z", "HBZ", "HD4", "HDL", "HLA", "HMS", "HNV", "HNW", "HSG", "HSH", "HSJ", "HSQ", "HSR", "HSU", "HSX", "HSY", "HSZ", "HTG", "HTM", "HVC", "I57", "IAB", "IDC", "IDF", "IDG", "IDR", "IDS", "IDT", "IDU", "IDX", "IDY", "IEM", "IN1", "IPT", "ISD", "ISL", "ISX", "IVG", "IXD", "J5B", "JFZ", "JHM", "JLT", "JRV", "JS2", "JSV", "JV4", "JVA", "JVS", "JZR", "K5B", "K99", "KBA", "KBG", "KD5", "KDA", "KDB", "KDD", "KDE", "KDF", "KDM", "KDN", "KDO", "KDR", "KFN", "KG1", "KGM", "KHP", "KME", "KO1", "KO2", "KOT", "KQC", "KTU", "L1L", "L6N", "L6S", "L6T", "LAG", "LAH", "LAI", "LAK", "LAO", "LAT", "LB2", "LBS", "LBT", "LCN", "LDY", "LEC", "LER", "LFC", "LFR", "LGC", "LGU", "LKA", "LKS", "LM2", "LMO", "LMT", "LMU", "LNV", "LOG", "LOX", "LPK", "LRH", "LSM", "LTG", "LTM", "LVO", "LVZ", "LXB", "LXC", "LXZ", "LZ0", "M1F", "M1P", "M2F", "M3M", "M3N", "M55", "M6D", "M6P", "M7B", "M7P", "M8C", "MA1", "MA2", "MA3", "MA8", "MAB", "MAF", "MAG", "MAL", "MAN", "MAT", "MAV", "MAW", "MBE", "MBF", "MBG", "MCU", "MDA", "MDP", "MFA", "MFB", "MFU", "MG5", "MGA", "MGC", "MGL", "MGS", "MJJ", "MLB", "MLR", "MMA", "MMN", "MN0", "MNA", "MQG", "MQT", "MRH", "MRP", "MSX", "MTT", "MUB", "MUG", "MUR", "MVP", "MXY", "MXZ", "MYG", "N1L", "N3U", "N9S", "NA1", "NAA", "NAG", "NBG", "NBX", "NBY", "NDG", "NED", "NFG", "NG1", "NG6", "NGA", "NGB", "NGC", "NGE", "NGF", "NGK", "NGL", "NGR", "NGS", "NGY", "NGZ", "NHF", "NLC", "NM6", "NM9", "NNG", "NOJ", "NPF", "NSQ", "NT1", "NTF", "NTO", "NTP", "NXD", "NYT", "O1G", "OAK", "OEL", "OI7", "OPM", "ORP", "OSU", "OTG", "OTN", "OTU", "OX2", "P53", "P6P", "P8E", "PA1", "PA5", "PAV", "PDX", "PH5", "PKM", "PNA", "PNG", "PNJ", "PNW", "PPC", "PRP", "PSG", "PSJ", "PSV", "PTQ", "PUF", "PZU", "QDK", "QIF", "QKH", "QPS", "QV4", "R1P", "R1X", "R2B", "R2G", "R5P", "RAA", "RAE", "RAF", "RAM", "RAO", "RAT", "RB5", "RBL", "RCD", "RDP", "REL", "RER", "RF5", "RG1", "RGG", "RHA", "RHC", "RI2", "RIB", "RIP", "RM4", "RNS", "RNT", "ROB", "ROR", "RP3", "RP5", "RP6", "RPA", "RR7", "RRJ", "RRY", "RST", "RTG", "RTV", "RUB", "RUG", "RUU", "RV7", "RVG", "RVM", "RWI", "RY7", "RZM", "S6P", "S7P", "S81", "SA0", "SCG", "SCR", "SDD", "SDY", "SEJ", "SF6", "SF9", "SFJ", "SFU", "SG4", "SG5", "SG6", "SG7", "SGA", "SGC", "SGD", "SGN", "SGS", "SHB", "SHD", "SHG", "SI3", "SIA", "SID", "SIO", "SIZ", "SLB", "SLM", "SLT", "SMD", "SN5", "SNG", "SOE", "SOG", "SOL", "SOR", "SR1", "SSG", "SSH", "STW", "STZ", "SUC", "SUP", "SUS", "SWE", "SZZ", "T68", "T6D", "T6P", "T6T", "TA6", "TAG", "TCB", "TCG", "TDG", "TEU", "TF0", "TFU", "TGA", "TGK", "TGR", "TGY", "TH1", "TM5", "TM6", "TM9", "TMR", "TMX", "TNX", "TOA", "TOC", "TQY", "TRE", "TRV", "TS8", "TT7", "TTV", "TTZ", "TU4", "TUG", "TUJ", "TUP", "TUR", "TVD", "TVG", "TVM", "TVS", "TVV", "TVY", "TW7", "TWA", "TWD", "TWG", "TWJ", "TWY", "TXB", "TY6", "TYV", "U1Y", "U2A", "U2D", "U63", "U8V", "U97", "U9A", "U9D", "U9G", "U9J", "U9M", "UAP", "UBH", "UBO", "UCD", "UDC", "UEA", "V3M", "V3P", "V71", "VDF", "VG1", "VJ1", "VJ4", "VKN", "VTB", "W9T", "WIA", "WKO", "WKT", "WOO", "WT8", "WUN", "WZ1", "WZ2", "WZ4", "X0X", "X1P", "X1X", "X2F", "X2Y", "X34", "X4S", "X5S", "X6N", "X6X", "X6Y", "X6Z", "XBP", "XDP", "XDX", "XGP", "XIL", "XIQ", "XKJ", "XLF", "XLS", "XMM", "XS2", "XUL", "XXM", "XXR", "XXX", "XY6", "XY9", "XYB", "XYF", "XYL", "XYP", "XYS", "XYT", "XYZ", "YDR", "YIO", "YJM", "YKR", "YO5", "YX0", "YX1", "YYB", "YYD", "YYH", "YYJ", "YYK", "YYM", "YYQ", "YYR", "YZ0", "YZT", "Z0F", "Z15", "Z16", "Z2D", "Z2T", "Z3K", "Z3L", "Z3Q", "Z3U", "Z4K", "Z4R", "Z4S", "Z4U", "Z4V", "Z4W", "Z4Y", "Z57", "Z5J", "Z5L", "Z61", "Z6G", "Z6H", "Z6J", "Z6W", "Z8H", "Z8T", "Z9D", "Z9E", "Z9H", "Z9K", "Z9L", "Z9M", "Z9N", "Z9W", "ZB0", "ZB1", "ZB2", "ZB3", "ZCD", "ZCZ", "ZD0", "ZDC", "ZDM", "ZDO", "ZEE", "ZEL", "ZGE", "ZMR", "UMQ", "SQD"]);
 
   // node_modules/molstar/lib/mol-model/structure/structure/carbohydrates/constants.js
   var SaccharideShape;
@@ -14793,7 +14945,7 @@ ${subTree.join("\n")}`;
   })(SetUtils || (SetUtils = {}));
 
   // node_modules/molstar/lib/mol-model/structure/model/types/lipids.js
-  var LipidNames = /* @__PURE__ */ new Set(["DAPC", "DBPC", "DFPC", "DGPC", "DIPC", "DLPC", "DNPC", "DOPC", "DPPC", "DRPC", "DTPC", "DVPC", "DXPC", "DYPC", "LPPC", "PAPC", "PEPC", "PGPC", "PIPC", "POPC", "PRPC", "PUPC", "DAPE", "DBPE", "DFPE", "DGPE", "DIPE", "DLPE", "DNPE", "DOPE", "DPPE", "DRPE", "DTPE", "DUPE", "DVPE", "DXPE", "DYPE", "LPPE", "PAPE", "PGPE", "PIPE", "POPE", "PQPE", "PRPE", "PUPE", "DAPS", "DBPS", "DFPS", "DGPS", "DIPS", "DLPS", "DNPS", "DOPS", "DPPS", "DRPS", "DTPS", "DUPS", "DVPS", "DXPS", "DYPS", "LPPS", "PAPS", "PGPS", "PIPS", "POPS", "PQPS", "PRPS", "PUPS", "DAPA", "DBPA", "DFPA", "DGPA", "DIPA", "DLPA", "DNPA", "DOPA", "DPPA", "DRPA", "DTPA", "DVPA", "DXPA", "DYPA", "LPPA", "PAPA", "PGPA", "PIPA", "POPA", "PRPA", "PUPA", "DAPG", "DBPG", "DFPG", "DGPG", "DIPG", "DLPG", "DNPG", "DOPG", "DPPG", "DRPG", "DTPG", "DVPG", "DXPG", "DYPG", "LPPG", "PAPG", "PGPG", "PIPG", "POPG", "PRPG", "DMPC", "DPP", "DPPI", "PAPI", "PIPI", "POP", "POPI", "PUPI", "PVP", "PVPI", "PADG", "PIDG", "PODG", "PUDG", "PVDG", "APC", "CPC", "IPC", "LPC", "OPC", "PPC", "TPC", "UPC", "VPC", "BNSM", "DBSM", "DPSM", "DXSM", "PGSM", "PNSM", "POSM", "PVSM", "XNSM", "DPCE", "DXCE", "PNCE", "XNCE"]);
+  var LipidNames = /* @__PURE__ */ new Set(["DAPC", "DBPC", "DFPC", "DGPC", "DIPC", "DLPC", "DNPC", "DOPC", "DPPC", "DRPC", "DTPC", "DVPC", "DXPC", "DYPC", "LPPC", "PAPC", "PEPC", "PGPC", "PIPC", "POPC", "PRPC", "PUPC", "DAPE", "DBPE", "DFPE", "DGPE", "DIPE", "DLPE", "DNPE", "DOPE", "DPPE", "DRPE", "DTPE", "DUPE", "DVPE", "DXPE", "DYPE", "LPPE", "PAPE", "PGPE", "PIPE", "POPE", "PQPE", "PRPE", "PUPE", "DAPS", "DBPS", "DFPS", "DGPS", "DIPS", "DLPS", "DNPS", "DOPS", "DPPS", "DRPS", "DTPS", "DUPS", "DVPS", "DXPS", "DYPS", "LPPS", "PAPS", "PGPS", "PIPS", "POPS", "PQPS", "PRPS", "PUPS", "DAPA", "DBPA", "DFPA", "DGPA", "DIPA", "DLPA", "DNPA", "DOPA", "DPPA", "DRPA", "DTPA", "DVPA", "DXPA", "DYPA", "LPPA", "PAPA", "PGPA", "PIPA", "POPA", "PRPA", "PUPA", "DAPG", "DBPG", "DFPG", "DGPG", "DIPG", "DLPG", "DNPG", "DOPG", "DPPG", "DRPG", "DTPG", "DVPG", "DXPG", "DYPG", "LPPG", "PAPG", "PGPG", "PIPG", "POPG", "PRPG", "DMPC", "DPP", "DPPI", "PAPI", "PIPI", "POP", "POPI", "PUPI", "PVP", "PVPI", "PADG", "PIDG", "PODG", "PUDG", "PVDG", "APC", "CPC", "IPC", "LPC", "OPC", "PPC", "TPC", "UPC", "VPC", "BNSM", "DBSM", "DPSM", "DXSM", "PGSM", "PNSM", "POSM", "PVSM", "XNSM", "DPCE", "DXCE", "PNCE", "XNCE", "PA", "ST", "OL", "LEO", "LEN", "AR", "DHA", "PC", "PE", "PS", "PH-", "P2-", "PGR", "PGS", "PI", "CHL"]);
 
   // node_modules/molstar/lib/mol-model/structure/model/types/ions.js
   var IonNames = /* @__PURE__ */ new Set(["118", "119", "543", "1AL", "1CU", "2FK", "2HP", "2OF", "3CO", "3MT", "3NI", "3OF", "3P8", "4MO", "4PU", "4TI", "6MO", "ACT", "AG", "AL", "ALF", "AM", "ATH", "AU", "AU3", "AUC", "AZI", "BA", "BCT", "BEF", "BF4", "BO4", "BR", "BS3", "BSY", "CA", "CAC", "CD", "CD1", "CD3", "CD5", "CE", "CF", "CHT", "CL", "CO", "CO3", "CO5", "CON", "CR", "CS", "CSB", "CU", "CU1", "CU3", "CUA", "CUZ", "CYN", "DME", "DMI", "DSC", "DTI", "DY", "E4N", "EDR", "EMC", "ER3", "EU", "EU3", "F", "FE", "FE2", "FPO", "GA", "GD3", "GEP", "HAI", "HG", "HGC", "IN", "IOD", "IR", "IR3", "IRI", "IUM", "K", "KO4", "LA", "LCO", "LCP", "LI", "LU", "MAC", "MG", "MH2", "MH3", "MLI", "MMC", "MN", "MN3", "MN5", "MN6", "MO1", "MO2", "MO3", "MO4", "MO5", "MO6", "MOO", "MOS", "MOW", "MW1", "MW2", "MW3", "NA", "NA2", "NA5", "NA6", "NAO", "NAW", "ND", "NET", "NH4", "NI", "NI1", "NI2", "NI3", "NO2", "NO3", "NRU", "NT3", "O4M", "OAA", "OC1", "OC2", "OC3", "OC4", "OC5", "OC6", "OC7", "OC8", "OCL", "OCM", "OCN", "OCO", "OF1", "OF2", "OF3", "OH", "OS", "OS4", "OXL", "PB", "PBM", "PD", "PDV", "PER", "PI", "PO3", "PO4", "PR", "PT", "PT4", "PTN", "RB", "RH3", "RHD", "RHF", "RU", "SB", "SCN", "SE4", "SEK", "SM", "SMO", "SO3", "SO4", "SR", "T1A", "TB", "TBA", "TCN", "TEA", "TH", "THE", "TL", "TMA", "TRA", "UNX", "V", "VN3", "VO4", "W", "WO5", "Y1", "YB", "YB2", "YH", "YT3", "ZCM", "ZN", "ZN2", "ZN3", "ZNO", "ZO3", "ZR", "ZTM", "NCO", "OHX"]);
@@ -14915,6 +15067,16 @@ ${subTree.join("\n")}`;
       coarseBackbone: /* @__PURE__ */ new Set(["P"])
     }
   };
+  var TraceAtoms = /* @__PURE__ */ new Set([
+    "CA",
+    "CA1",
+    "BB",
+    "BAS",
+    "O3'",
+    "O3*",
+    "N4'",
+    "N4*"
+  ]);
   var DProteinComponentTypeNames = /* @__PURE__ */ new Set([
     "d-peptide linking",
     "d-peptide nh3 amino terminus",
@@ -15599,6 +15761,67 @@ ${subTree.join("\n")}`;
     }
     IndexPairBonds2.getEdgeIndexForOperators = getEdgeIndexForOperators;
   })(IndexPairBonds || (IndexPairBonds = {}));
+
+  // node_modules/molstar/lib/mol-model/custom-property.js
+  function CustomPropertyDescriptor(desc) {
+    return desc;
+  }
+  (function(CustomPropertyDescriptor2) {
+    function getUUID(prop) {
+      if (!prop.__key) {
+        prop.__key = UUID.create22();
+      }
+      return prop.__key;
+    }
+    CustomPropertyDescriptor2.getUUID = getUUID;
+  })(CustomPropertyDescriptor || (CustomPropertyDescriptor = {}));
+  var CustomProperties = class {
+    constructor() {
+      this._list = [];
+      this._set = /* @__PURE__ */ new Set();
+      this._refs = /* @__PURE__ */ new Map();
+      this._assets = /* @__PURE__ */ new Map();
+    }
+    get all() {
+      return this._list;
+    }
+    add(desc) {
+      if (this._set.has(desc))
+        return;
+      this._list.push(desc);
+      this._set.add(desc);
+    }
+    reference(desc, add) {
+      let refs = this._refs.get(desc) || 0;
+      refs += add ? 1 : -1;
+      this._refs.set(desc, Math.max(refs, 0));
+    }
+    hasReference(desc) {
+      return (this._refs.get(desc) || 0) > 0;
+    }
+    has(desc) {
+      return this._set.has(desc);
+    }
+    /** Sets assets for a prop, disposes of existing assets for that prop */
+    assets(desc, assets) {
+      const prevAssets = this._assets.get(desc);
+      if (prevAssets) {
+        for (const a of prevAssets)
+          a.dispose();
+      }
+      if (assets)
+        this._assets.set(desc, assets);
+      else
+        this._assets.delete(desc);
+    }
+    /** Disposes of all assets of all props */
+    dispose() {
+      this._assets.forEach((assets) => {
+        for (const a of assets)
+          a.dispose();
+      });
+    }
+  };
 
   // node_modules/molstar/lib/mol-io/reader/common/text/column/token.js
   function areValuesEqualProvider(tokens) {
@@ -21049,7 +21272,7 @@ ${subTree.join("\n")}`;
   };
   var __ElementIndex = { "H": 0, "h": 0, "D": 0, "d": 0, "T": 0, "t": 0, "He": 2, "HE": 2, "he": 2, "Li": 3, "LI": 3, "li": 3, "Be": 4, "BE": 4, "be": 4, "B": 5, "b": 5, "C": 6, "c": 6, "N": 7, "n": 7, "O": 8, "o": 8, "F": 9, "f": 9, "Ne": 10, "NE": 10, "ne": 10, "Na": 11, "NA": 11, "na": 11, "Mg": 12, "MG": 12, "mg": 12, "Al": 13, "AL": 13, "al": 13, "Si": 14, "SI": 14, "si": 14, "P": 15, "p": 15, "S": 16, "s": 16, "Cl": 17, "CL": 17, "cl": 17, "Ar": 18, "AR": 18, "ar": 18, "K": 19, "k": 19, "Ca": 20, "CA": 20, "ca": 20, "Sc": 21, "SC": 21, "sc": 21, "Ti": 22, "TI": 22, "ti": 22, "V": 23, "v": 23, "Cr": 24, "CR": 24, "cr": 24, "Mn": 25, "MN": 25, "mn": 25, "Fe": 26, "FE": 26, "fe": 26, "Co": 27, "CO": 27, "co": 27, "Ni": 28, "NI": 28, "ni": 28, "Cu": 29, "CU": 29, "cu": 29, "Zn": 30, "ZN": 30, "zn": 30, "Ga": 31, "GA": 31, "ga": 31, "Ge": 32, "GE": 32, "ge": 32, "As": 33, "AS": 33, "as": 33, "Se": 34, "SE": 34, "se": 34, "Br": 35, "BR": 35, "br": 35, "Kr": 36, "KR": 36, "kr": 36, "Rb": 37, "RB": 37, "rb": 37, "Sr": 38, "SR": 38, "sr": 38, "Y": 39, "y": 39, "Zr": 40, "ZR": 40, "zr": 40, "Nb": 41, "NB": 41, "nb": 41, "Mo": 42, "MO": 42, "mo": 42, "Tc": 43, "TC": 43, "tc": 43, "Ru": 44, "RU": 44, "ru": 44, "Rh": 45, "RH": 45, "rh": 45, "Pd": 46, "PD": 46, "pd": 46, "Ag": 47, "AG": 47, "ag": 47, "Cd": 48, "CD": 48, "cd": 48, "In": 49, "IN": 49, "in": 49, "Sn": 50, "SN": 50, "sn": 50, "Sb": 51, "SB": 51, "sb": 51, "Te": 52, "TE": 52, "te": 52, "I": 53, "i": 53, "Xe": 54, "XE": 54, "xe": 54, "Cs": 55, "CS": 55, "cs": 55, "Ba": 56, "BA": 56, "ba": 56, "La": 57, "LA": 57, "la": 57, "Ce": 58, "CE": 58, "ce": 58, "Pr": 59, "PR": 59, "pr": 59, "Nd": 60, "ND": 60, "nd": 60, "Pm": 61, "PM": 61, "pm": 61, "Sm": 62, "SM": 62, "sm": 62, "Eu": 63, "EU": 63, "eu": 63, "Gd": 64, "GD": 64, "gd": 64, "Tb": 65, "TB": 65, "tb": 65, "Dy": 66, "DY": 66, "dy": 66, "Ho": 67, "HO": 67, "ho": 67, "Er": 68, "ER": 68, "er": 68, "Tm": 69, "TM": 69, "tm": 69, "Yb": 70, "YB": 70, "yb": 70, "Lu": 71, "LU": 71, "lu": 71, "Hf": 72, "HF": 72, "hf": 72, "Ta": 73, "TA": 73, "ta": 73, "W": 74, "w": 74, "Re": 75, "RE": 75, "re": 75, "Os": 76, "OS": 76, "os": 76, "Ir": 77, "IR": 77, "ir": 77, "Pt": 78, "PT": 78, "pt": 78, "Au": 79, "AU": 79, "au": 79, "Hg": 80, "HG": 80, "hg": 80, "Tl": 81, "TL": 81, "tl": 81, "Pb": 82, "PB": 82, "pb": 82, "Bi": 83, "BI": 83, "bi": 83, "Po": 84, "PO": 84, "po": 84, "At": 85, "AT": 85, "at": 85, "Rn": 86, "RN": 86, "rn": 86, "Fr": 87, "FR": 87, "fr": 87, "Ra": 88, "RA": 88, "ra": 88, "Ac": 89, "AC": 89, "ac": 89, "Th": 90, "TH": 90, "th": 90, "Pa": 91, "PA": 91, "pa": 91, "U": 92, "u": 92, "Np": 93, "NP": 93, "np": 93, "Pu": 94, "PU": 94, "pu": 94, "Am": 95, "AM": 95, "am": 95, "Cm": 96, "CM": 96, "cm": 96, "Bk": 97, "BK": 97, "bk": 97, "Cf": 98, "CF": 98, "cf": 98, "Es": 99, "ES": 99, "es": 99, "Fm": 100, "FM": 100, "fm": 100, "Md": 101, "MD": 101, "md": 101, "No": 102, "NO": 102, "no": 102, "Lr": 103, "LR": 103, "lr": 103, "Rf": 104, "RF": 104, "rf": 104, "Db": 105, "DB": 105, "db": 105, "Sg": 106, "SG": 106, "sg": 106, "Bh": 107, "BH": 107, "bh": 107, "Hs": 108, "HS": 108, "hs": 108, "Mt": 109, "MT": 109, "mt": 109 };
   var __ElementBondThresholds = { 0: 1.42, 1: 1.42, 3: 2.7, 4: 2.7, 6: 1.75, 7: 1.6, 8: 1.52, 11: 2.7, 12: 2.7, 13: 2.7, 14: 1.9, 15: 2, 16: 1.9, 17: 1.8, 19: 2.7, 20: 2.7, 21: 2.7, 22: 2.7, 23: 2.7, 24: 2.7, 25: 2.7, 26: 2.7, 27: 2.7, 28: 2.7, 29: 2.7, 30: 2.7, 31: 2.7, 33: 2.68, 37: 2.7, 38: 2.7, 39: 2.7, 40: 2.7, 41: 2.7, 42: 2.7, 43: 2.7, 44: 2.7, 45: 2.7, 46: 2.7, 47: 2.7, 48: 2.7, 49: 2.7, 50: 2.7, 55: 2.7, 56: 2.7, 57: 2.7, 58: 2.7, 59: 2.7, 60: 2.7, 61: 2.7, 62: 2.7, 63: 2.7, 64: 2.7, 65: 2.7, 66: 2.7, 67: 2.7, 68: 2.7, 69: 2.7, 70: 2.7, 71: 2.7, 72: 2.7, 73: 2.7, 74: 2.7, 75: 2.7, 76: 2.7, 77: 2.7, 78: 2.7, 79: 2.7, 80: 2.7, 81: 2.7, 82: 2.7, 83: 2.7, 87: 2.7, 88: 2.7, 89: 2.7, 90: 2.7, 91: 2.7, 92: 2.7, 93: 2.7, 94: 2.7, 95: 2.7, 96: 2.7, 97: 2.7, 98: 2.7, 99: 2.7, 100: 2.7, 101: 2.7, 102: 2.7, 103: 2.7, 104: 2.7, 105: 2.7, 106: 2.7, 107: 2.7, 108: 2.7, 109: 2.88 };
-  var __ElementPairThresholds = { 0: 0.8, 20: 1.31, 27: 1.2, 35: 1.15, 44: 1.1, 54: 1, 60: 1.84, 72: 1.88, 84: 1.75, 85: 1.56, 86: 1.76, 98: 1.6, 99: 1.68, 100: 1.63, 112: 1.6, 113: 1.59, 114: 1.36, 129: 1.45, 135: 1.47, 144: 1.6, 152: 1.45, 170: 1.4, 180: 1.55, 202: 2.4, 222: 2.24, 224: 1.91, 225: 1.98, 243: 2.02, 269: 2, 293: 1.9, 316: 1.8, 420: 2.37, 480: 2.3, 512: 2.3, 544: 2.3, 612: 2.1, 629: 1.54, 665: 1, 813: 2.6, 854: 2.27, 894: 1.93, 896: 2.1, 937: 2.05, 938: 2.06, 981: 1.62, 1258: 2.68, 1309: 2.33, 1484: 1, 1763: 2.14, 1823: 2.48, 1882: 2.1, 1944: 1.72, 2380: 2.34, 3367: 2.44, 3733: 2.11, 3819: 2.6, 3821: 2.36, 4736: 2.75, 5724: 2.73, 5959: 2.63, 6519: 2.84, 6750: 2.87, 8991: 2.81 };
+  var __ElementPairThresholds = { 0: 0.8, 20: 1.31, 27: 1.2, 35: 1.15, 44: 1.1, 54: 1, 60: 1.84, 72: 1.88, 84: 1.75, 85: 1.56, 86: 1.76, 98: 1.6, 99: 1.68, 100: 1.63, 112: 1.6, 113: 1.59, 114: 1.36, 129: 1.45, 135: 1.47, 144: 1.6, 152: 1.45, 170: 1.4, 180: 1.55, 202: 2.4, 222: 2.24, 224: 1.91, 225: 1.98, 243: 2.02, 269: 2, 293: 1.9, 316: 1.8, 420: 2.37, 480: 2.3, 512: 2.3, 544: 2.3, 612: 2.1, 629: 1.54, 665: 1, 813: 2.6, 851: 2.65, 854: 2.27, 894: 1.93, 896: 2.1, 937: 2.05, 938: 2.06, 981: 1.62, 1258: 2.68, 1309: 2.33, 1484: 1, 1763: 2.14, 1823: 2.48, 1882: 2.1, 1944: 1.72, 2063: 2.72, 2380: 2.34, 3132: 2.6, 3367: 2.44, 3733: 2.11, 3819: 2.6, 3821: 2.36, 4736: 2.75, 5724: 2.73, 5959: 2.63, 6519: 2.84, 6750: 2.87, 8991: 2.81 };
   var __DefaultBondingRadius = 2.001;
   var MetalsSet = (function() {
     const metals = ["LI", "NA", "K", "RB", "CS", "FR", "BE", "MG", "CA", "SR", "BA", "RA", "AL", "GA", "IN", "SN", "TL", "PB", "BI", "SC", "TI", "V", "CR", "MN", "FE", "CO", "NI", "CU", "ZN", "Y", "ZR", "NB", "MO", "TC", "RU", "RH", "PD", "AG", "CD", "LA", "HF", "TA", "W", "RE", "OS", "IR", "PT", "AU", "HG", "AC", "RF", "DB", "SG", "BH", "HS", "MT", "CE", "PR", "ND", "PM", "SM", "EU", "GD", "TB", "DY", "HO", "ER", "TM", "YB", "LU", "TH", "PA", "U", "NP", "PU", "AM", "CM", "BK", "CF", "ES", "FM", "MD", "NO", "LR"];
@@ -24244,8 +24467,8 @@ ${subTree.join("\n")}`;
     const bondOffset = state.bonds.offset;
     const a = state.startVertex + i;
     const bStart = bondOffset[a], bEnd = bondOffset[a + 1];
-    const bondCount = bEnd - bStart;
-    if (bondCount <= 1 || state.isRingAtom[i] && bondCount === 2)
+    const bondCount2 = bEnd - bStart;
+    if (bondCount2 <= 1 || state.isRingAtom[i] && bondCount2 === 2)
       return false;
     return true;
   }
@@ -25816,9 +26039,10 @@ ${subTree.join("\n")}`;
       get boundary() {
         if (this.props.boundary)
           return this.props.boundary;
+        const fast = Traits.is(this.traits, Trait.FastBoundary);
         const { x, y, z } = this.model.atomicConformation;
-        const radius = Model.getAtomicRadii(this.model);
-        this.props.boundary = Traits.is(this.traits, Trait.FastBoundary) ? getFastBoundary({ x, y, z, radius, indices: this.elements }) : getBoundary({ x, y, z, radius, indices: this.elements });
+        const radius = fast ? void 0 : Model.getAtomicRadii(this.model);
+        this.props.boundary = fast ? getFastBoundary({ x, y, z, radius, indices: this.elements }) : getBoundary({ x, y, z, radius, indices: this.elements });
         return this.props.boundary;
       }
       get lookup3d() {
@@ -29593,6 +29817,8 @@ ${subTree.join("\n")}`;
   var residue = {
     key: p2((l) => !Unit.isAtomic(l.unit) ? notAtomic() : l.unit.residueIndex[l.element]),
     group_PDB: p2((l) => !Unit.isAtomic(l.unit) ? notAtomic() : l.unit.model.atomicHierarchy.residues.group_PDB.value(l.unit.residueIndex[l.element])),
+    label_comp_id: p2(compId),
+    auth_comp_id: p2((l) => !Unit.isAtomic(l.unit) ? notAtomic() : l.unit.model.atomicHierarchy.atoms.auth_comp_id.value(l.element)),
     label_seq_id: p2(seqId),
     auth_seq_id: p2((l) => !Unit.isAtomic(l.unit) ? notAtomic() : l.unit.model.atomicHierarchy.residues.auth_seq_id.value(l.unit.residueIndex[l.element])),
     pdbx_PDB_ins_code: p2((l) => !Unit.isAtomic(l.unit) ? notAtomic() : l.unit.model.atomicHierarchy.residues.pdbx_PDB_ins_code.value(l.unit.residueIndex[l.element])),
@@ -31052,6 +31278,29 @@ ${subTree.join("\n")}`;
       return ret;
     }
     StructureSymmetry2.computeTransformGroups = computeTransformGroups;
+    function computeChildAwareTransformGroups(s) {
+      if (!s.child)
+        return computeTransformGroups(s);
+      const childGroups = s.child.unitSymmetryGroups;
+      const childGroupIndex = /* @__PURE__ */ new Map();
+      for (let i = 0; i < childGroups.length; i++) {
+        for (const u of childGroups[i].units) {
+          childGroupIndex.set(u.id, i);
+        }
+      }
+      const groups = EquivalenceClasses((u) => {
+        var _a;
+        return hash2(Unit.hashUnit(u), (_a = childGroupIndex.get(u.id)) !== null && _a !== void 0 ? _a : -1);
+      }, (a, b) => areUnitsEquivalent(a, b) && childGroupIndex.get(a.id) === childGroupIndex.get(b.id));
+      for (const u of s.units)
+        groups.add(u.id, u);
+      const ret = [];
+      for (const eqUnits of groups.groups) {
+        ret.push(Unit.SymmetryGroup(eqUnits.map((id) => s.unitMap.get(id))));
+      }
+      return ret;
+    }
+    StructureSymmetry2.computeChildAwareTransformGroups = computeChildAwareTransformGroups;
     function areTransformGroupsEquivalent(a, b) {
       if (a.length !== b.length)
         return false;
@@ -31065,6 +31314,8 @@ ${subTree.join("\n")}`;
           if (au[j].conformation !== bu[j].conformation)
             return false;
         }
+        if (!SortedArray.areEqual(a[i].elements, b[i].elements))
+          return false;
       }
       return true;
     }
@@ -31700,6 +31951,118 @@ ${subTree.join("\n")}`;
     return { getElementIndices, getLinkIndices, getTerminalLinkIndices };
   }
 
+  // node_modules/molstar/lib/mol-model/structure/structure/coordination/data.js
+  var EmptyCoordination = {
+    sites: {
+      unitIds: [],
+      indices: [],
+      numbers: [],
+      count: 0
+    },
+    getSiteIndex: () => -1,
+    eachLigand: () => {
+    }
+  };
+
+  // node_modules/molstar/lib/mol-model/structure/structure/coordination/compute.js
+  var MinCoordination = 4;
+  function interBondCount(structure, unit2, index) {
+    let count2 = 0;
+    const indices = structure.interUnitBonds.getEdgeIndices(index, unit2.id);
+    for (let i = 0, il = indices.length; i < il; ++i) {
+      const b = structure.interUnitBonds.edges[indices[i]];
+      if (BondType.isCovalent(b.props.flag) || BondType.is(b.props.flag, BondType.Flag.MetallicCoordination))
+        count2 += 1;
+    }
+    return count2;
+  }
+  function intraBondCount(unit2, index) {
+    let count2 = 0;
+    const { offset: offset2, edgeProps: { flags: flags2 } } = unit2.bonds;
+    for (let i = offset2[index], il = offset2[index + 1]; i < il; ++i) {
+      if (BondType.isCovalent(flags2[i]) || BondType.is(flags2[i], BondType.Flag.MetallicCoordination))
+        count2 += 1;
+    }
+    return count2;
+  }
+  function bondCount(structure, unit2, index) {
+    return interBondCount(structure, unit2, index) + intraBondCount(unit2, index);
+  }
+  var _H = AtomicNumbers["H"];
+  function eachInterBondedAtom(structure, unit2, index, cb) {
+    const indices = structure.interUnitBonds.getEdgeIndices(index, unit2.id);
+    for (let i = 0, il = indices.length; i < il; ++i) {
+      const b = structure.interUnitBonds.edges[indices[i]];
+      const uB = structure.unitMap.get(b.unitB);
+      if ((BondType.isCovalent(b.props.flag) || BondType.is(b.props.flag, BondType.Flag.MetallicCoordination)) && uB.model.atomicHierarchy.derived.atom.atomicNumber[uB.elements[b.indexB]] !== _H)
+        cb(uB, b.indexB);
+    }
+  }
+  function eachIntraBondedAtom(unit2, index, cb) {
+    const { elements } = unit2;
+    const { atomicNumber } = unit2.model.atomicHierarchy.derived.atom;
+    const { offset: offset2, b, edgeProps: { flags: flags2 } } = unit2.bonds;
+    for (let i = offset2[index], il = offset2[index + 1]; i < il; ++i) {
+      if ((BondType.isCovalent(flags2[i]) || BondType.is(flags2[i], BondType.Flag.MetallicCoordination)) && atomicNumber[elements[b[i]]] !== _H)
+        cb(unit2, b[i]);
+    }
+  }
+  function eachBondedAtom(structure, unit2, index, cb) {
+    eachInterBondedAtom(structure, unit2, index, cb);
+    eachIntraBondedAtom(unit2, index, cb);
+  }
+  function computeCoordination(structure) {
+    const unitIds = [];
+    const indices = [];
+    const numbers = [];
+    const siteIndex = /* @__PURE__ */ new Map();
+    for (let ui = 0, uil = structure.units.length; ui < uil; ++ui) {
+      const unit2 = structure.units[ui];
+      if (!Unit.isAtomic(unit2))
+        continue;
+      const { elements } = unit2;
+      for (let ei = 0, eil = elements.length; ei < eil; ++ei) {
+        const element = elements[ei];
+        const unitIndex = ei;
+        const _bondCount = bondCount(structure, unit2, unitIndex);
+        if (_bondCount >= MinCoordination) {
+          siteIndex.set(coordinationKey(unit2.id, element), siteIndex.size);
+          unitIds.push(unit2.id);
+          indices.push(unitIndex);
+          numbers.push(_bondCount);
+        }
+      }
+    }
+    if (siteIndex.size === 0)
+      return EmptyCoordination;
+    const l = element_exports.Location.create(structure);
+    return {
+      sites: {
+        unitIds,
+        indices,
+        numbers,
+        count: siteIndex.size
+      },
+      getSiteIndex: (unit2, element) => {
+        var _a;
+        return (_a = siteIndex.get(coordinationKey(unit2.id, element))) !== null && _a !== void 0 ? _a : -1;
+      },
+      eachLigand: (siteIndex2, cb) => {
+        const unitId = unitIds[siteIndex2];
+        const element = indices[siteIndex2];
+        const unit2 = structure.unitMap.get(unitId);
+        eachBondedAtom(structure, unit2, element, (u, i) => {
+          l.unit = u;
+          l.element = u.elements[i];
+          cb(l);
+        });
+      }
+    };
+  }
+  function coordinationKey(unitId, element) {
+    return cantorPairing(unitId, element);
+  }
+
   // node_modules/molstar/lib/mol-model/structure/structure/util/boundary.js
   var tmpSphere = Sphere3D();
   var boundaryHelperCoarse2 = new BoundaryHelper("14");
@@ -31761,18 +32124,18 @@ ${subTree.join("\n")}`;
     };
   }
   function getIntraUnitBondMapping(structure) {
-    let bondCount = 0;
+    let bondCount2 = 0;
     const unitGroupOffset = [];
     for (const ug of structure.unitSymmetryGroups) {
-      unitGroupOffset.push(bondCount);
+      unitGroupOffset.push(bondCount2);
       const unit2 = ug.units[0];
       if (Unit.isAtomic(unit2)) {
-        bondCount += unit2.bonds.edgeCount * 2 * ug.units.length;
+        bondCount2 += unit2.bonds.edgeCount * 2 * ug.units.length;
       }
     }
-    const unitIndex = new Uint32Array(bondCount);
-    const unitEdgeIndex = new Uint32Array(bondCount);
-    const unitGroupIndex = new Uint32Array(bondCount);
+    const unitIndex = new Uint32Array(bondCount2);
+    const unitEdgeIndex = new Uint32Array(bondCount2);
+    const unitGroupIndex = new Uint32Array(bondCount2);
     let idx = 0;
     let unitIdx = 0;
     for (const ug of structure.unitSymmetryGroups) {
@@ -31790,7 +32153,7 @@ ${subTree.join("\n")}`;
       }
       unitIdx += 1;
     }
-    return { bondCount, unitIndex, unitEdgeIndex, unitGroupIndex, unitGroupOffset };
+    return { bondCount: bondCount2, unitIndex, unitEdgeIndex, unitGroupIndex, unitGroupOffset };
   }
 
   // node_modules/molstar/lib/mol-model/structure/structure/structure.js
@@ -31979,6 +32342,12 @@ ${subTree.join("\n")}`;
         return this.state.carbohydrates;
       this.state.carbohydrates = computeCarbohydrates(this);
       return this.state.carbohydrates;
+    }
+    get coordination() {
+      if (this.state.coordination)
+        return this.state.coordination;
+      this.state.coordination = computeCoordination(this);
+      return this.state.coordination;
     }
     get models() {
       if (this.state.models)
@@ -36236,6 +36605,17 @@ ${subTree.join("\n")}`;
      */
     chemical_formula: {
       /**
+       * Formula expressed in conformance with IUPAC rules for inorganic
+       * and metal-organic compounds where these conflict with the rules
+       * for any other chemical_formula entries. Typically used for
+       * formatting a formula in accordance with journal rules. This
+       * should appear in the data block in addition to the most
+       * appropriate of the other chemical_formula data names.
+       * Ref: IUPAC (1990). Nomenclature of Inorganic Chemistry.
+       * Oxford: Blackwell Scientific Publications.
+       */
+      iupac: str8,
+      /**
        * Formula with each discrete bonded residue or ion shown as a
        * separate moiety. See above CHEMICAL_FORMULA for rules
        * for writing chemical formulae. In addition to the general
@@ -36305,6 +36685,32 @@ ${subTree.join("\n")}`;
        */
       it_number: int5,
       /**
+       * _space_group.name_H-M_alt allows for any Hermann-Mauguin symbol
+       * to be given. The way in which this item is used is determined
+       * by the user and in general is not intended to be interpreted by
+       * computer. It may, for example, be used to give one of the
+       * extended Hermann-Mauguin symbols given in Table 4.3.1 of
+       * International Tables for Crystallography Vol. A (1995) or
+       * a Hermann-Mauguin symbol for a conventional or unconventional
+       * setting.
+       * Each component of the space group name is separated by a
+       * space or underscore. The use of space is strongly
+       * recommended. The underscore is only retained because it
+       * was used in earlier archived files. It should not be
+       * used in new CIFs. Subscripts should appear without special
+       * symbols. Bars should be given as negative signs before the
+       * numbers to which they apply.
+       * The commonly used Hermann-Mauguin symbol determines the space
+       * group type uniquely, but a given space group type may be
+       * described by more than one Hermann-Mauguin symbol. The space
+       * group type is best described using _space_group.IT_number.
+       * The Hermann-Mauguin symbol may contain information on the
+       * choice of basis though not on the choice of origin. To
+       * define the setting uniquely use _space_group.name_Hall or
+       * list the symmetry operations.
+       */
+      "name_h-m_alt": str8,
+      /**
        * The full international Hermann-Mauguin space-group symbol as
        * defined in Section 2.1.3.3 and given as the second item of the
        * second line of each of the space-group tables of Chapter 2.3 of
@@ -36334,7 +36740,19 @@ ${subTree.join("\n")}`;
        * Space-group symmetry, edited by M. I. Aroyo, 6th ed.
        * Chichester: John Wiley & Sons.
        */
-      "name_h-m_full": str8
+      "name_h-m_full": str8,
+      /**
+       * Space group symbol defined by Hall. Each component of the
+       * space group name is separated by a space or an underscore.
+       * The use of space is strongly recommended because it specifies
+       * the coordinate system. The underscore in the name is only
+       * retained because it was used in earlier archived files. It
+       * should not be used in new CIFs.
+       * Ref: Hall, S. R. (1981). Acta Cryst. A37, 517-525
+       * [See also International Tables for Crystallography,
+       * Vol. B (1993) 1.4 Appendix B]
+       */
+      name_hall: str8
     },
     /**
      * The category of data items used to describe symmetry equivalent sites
@@ -36834,12 +37252,22 @@ ${subTree.join("\n")}`;
     "cell.formula_units_z": [
       "cell_formula_units_Z"
     ],
+    "chemical_formula.iupac": [
+      "chemical_formula_IUPAC"
+    ],
     "space_group.it_number": [
       "space_group_IT_number",
       "symmetry_Int_Tables_number"
     ],
+    "space_group.name_h-m_alt": [
+      "space_group_name_H-M_alt"
+    ],
     "space_group.name_h-m_full": [
       "symmetry_space_group_name_H-M"
+    ],
+    "space_group.name_hall": [
+      "space_group_name_Hall",
+      "symmetry_space_group_name_Hall"
     ],
     "space_group_symop.operation_xyz": [
       "symmetry_equiv_pos_as_xyz"
@@ -39301,9 +39729,6 @@ ${subTree.join("\n")}`;
           modelNum: i,
           atomicConformation: getAtomicConformationFromFrame(model, f),
           // TODO: add support for supplying sphere and gaussian coordinates in addition to atomic coordinates?
-          // coarseConformation: coarse.conformation,
-          customProperties: new CustomProperties(),
-          _staticPropertyData: /* @__PURE__ */ Object.create(null),
           _dynamicPropertyData: /* @__PURE__ */ Object.create(null)
         };
         if (f.cell) {
@@ -39320,10 +39745,10 @@ ${subTree.join("\n")}`;
       const srcIndex = model.atomicHierarchy.atomSourceIndex;
       let srcIndexArray = void 0;
       if ("__srcIndexArray__" in model._staticPropertyData) {
-        srcIndexArray = model._dynamicPropertyData.__srcIndexArray__;
+        srcIndexArray = model._staticPropertyData.__srcIndexArray__;
       } else {
         srcIndexArray = Column.isIdentity(srcIndex) ? void 0 : srcIndex.toArray({ array: Int32Array });
-        model._dynamicPropertyData.__srcIndexArray__ = srcIndexArray;
+        model._staticPropertyData.__srcIndexArray__ = srcIndexArray;
       }
       return srcIndexArray;
     }
@@ -39370,15 +39795,15 @@ ${subTree.join("\n")}`;
     Model2.getCenter = getCenter;
     const AtomicRadiiProp = "__AtomicRadii__";
     function getAtomicRadii(model) {
-      if (model._dynamicPropertyData[AtomicRadiiProp])
-        return model._dynamicPropertyData[AtomicRadiiProp];
+      if (model._staticPropertyData[AtomicRadiiProp])
+        return model._staticPropertyData[AtomicRadiiProp];
       const nAtoms = model.atomicHierarchy.atoms._rowCount;
       const type_symbol = model.atomicHierarchy.atoms.type_symbol.value;
       const radii = new Float32Array(nAtoms);
       for (let i = 0; i < nAtoms; i++) {
         radii[i] = VdwRadius(type_symbol(i));
       }
-      model._dynamicPropertyData[AtomicRadiiProp] = radii;
+      model._staticPropertyData[AtomicRadiiProp] = radii;
       return radii;
     }
     Model2.getAtomicRadii = getAtomicRadii;
@@ -39463,7 +39888,7 @@ ${subTree.join("\n")}`;
               polymerDirectionCount += 1;
           }
         }
-        let hasBB = false, hasSC1 = false;
+        let hasBB = false, hasSC1 = false, hasTrace = false;
         const { label_atom_id, _rowCount: atomCount2 } = model.atomicHierarchy.atoms;
         for (let i = 0; i < atomCount2; ++i) {
           const atomName = label_atom_id.value(i);
@@ -39471,7 +39896,9 @@ ${subTree.join("\n")}`;
             hasBB = true;
           if (!hasSC1 && atomName === "SC1")
             hasSC1 = true;
-          if (hasBB && hasSC1)
+          if (!hasTrace && TraceAtoms.has(atomName))
+            hasTrace = true;
+          if (hasBB && hasSC1 && hasTrace)
             break;
         }
         coarseGrained = false;
@@ -39480,7 +39907,7 @@ ${subTree.join("\n")}`;
             coarseGrained = true;
           } else if (atomCount2 / polymerResidueCount < 3) {
             coarseGrained = true;
-          } else if (polymerDirectionCount === 0) {
+          } else if (polymerDirectionCount === 0 && hasTrace) {
             coarseGrained = true;
           }
         }

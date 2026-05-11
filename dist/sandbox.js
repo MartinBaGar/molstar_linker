@@ -857,6 +857,13 @@
           return out;
         }
         Vec32.div = div;
+        function mod(out, a5, b5) {
+          out[0] = a5[0] % b5[0];
+          out[1] = a5[1] % b5[1];
+          out[2] = a5[2] % b5[2];
+          return out;
+        }
+        Vec32.mod = mod;
         function scale(out, a5, b5) {
           out[0] = a5[0] * b5;
           out[1] = a5[1] * b5;
@@ -1189,6 +1196,18 @@
           return Mat4.fromRotation(mat, by, axis);
         }
         Vec32.makeRotation = makeRotation;
+        const tmpCrossAxis = Vec32();
+        function rotateAroundAxis(out, v2, axis, angle2) {
+          const cos = Math.cos(angle2);
+          const sin = Math.sin(angle2);
+          const dot2 = Vec32.dot(v2, axis);
+          Vec32.cross(tmpCrossAxis, axis, v2);
+          out[0] = v2[0] * cos + tmpCrossAxis[0] * sin + axis[0] * dot2 * (1 - cos);
+          out[1] = v2[1] * cos + tmpCrossAxis[1] * sin + axis[1] * dot2 * (1 - cos);
+          out[2] = v2[2] * cos + tmpCrossAxis[2] * sin + axis[2] * dot2 * (1 - cos);
+          return out;
+        }
+        Vec32.rotateAroundAxis = rotateAroundAxis;
         function isZero(v2) {
           return v2[0] === 0 && v2[1] === 0 && v2[2] === 0;
         }
@@ -2871,11 +2890,10 @@
           Vec3.normalize(tangent0, tangent0);
           const tangent1 = Vec3.cross(_v3pb, normal, tangent0);
           Vec3.normalize(tangent1, tangent1);
-          setAxes(out, normal, tangent0, tangent1);
+          fromBasis(out, tangent0, tangent1, normal);
           out[12] = point[0];
           out[13] = point[1];
           out[14] = point[2];
-          out[15] = 1;
           return out;
         }
         Mat42.fromPlane = fromPlane;
@@ -3622,6 +3640,201 @@
           return (xs) => reorder(xs, indices2);
         }
         Tensor2.convertToCanonicalAxisIndicesSlowToFast = convertToCanonicalAxisIndicesSlowToFast;
+        function floodfill1(tensor, threshold) {
+          const [xn] = tensor.space.dimensions;
+          const { data } = tensor;
+          const visited = new Uint8Array(data.length);
+          let leftEnd = -1;
+          if (data[0] < threshold) {
+            for (let x = 0; x < xn && data[x] < threshold; x++) {
+              visited[x] = 1;
+              leftEnd = x;
+            }
+          }
+          if (data[xn - 1] < threshold) {
+            for (let x = xn - 1; x > leftEnd && data[x] < threshold; x--) {
+              visited[x] = 1;
+            }
+          }
+          return visited;
+        }
+        function floodfill2(tensor, threshold) {
+          const [xn, yn] = tensor.space.dimensions;
+          const { dataOffset: o, getCoords: getCoords2 } = tensor.space;
+          const { data } = tensor;
+          const visited = new Uint8Array(data.length);
+          const stack = [];
+          const coords = [0, 0];
+          const xn1 = xn - 1;
+          const yn1 = yn - 1;
+          const isBoundary = (x, y) => x === 0 || y === 0 || x === xn1 || y === yn1;
+          for (let y = 0; y < yn; y++) {
+            for (let x = 0; x < xn; x++) {
+              const offset2 = o(x, y);
+              if (!visited[offset2] && data[offset2] < threshold && isBoundary(x, y)) {
+                stack.push(offset2);
+                while (stack.length > 0) {
+                  const voffset = stack.pop();
+                  if (visited[voffset])
+                    continue;
+                  visited[voffset] = 1;
+                  getCoords2(voffset, coords);
+                  const [vx, vy] = coords;
+                  if (vx > 0) {
+                    const noffset = o(vx - 1, vy);
+                    if (!visited[noffset] && data[noffset] < threshold) {
+                      stack.push(noffset);
+                    }
+                  }
+                  if (vx < xn1) {
+                    const noffset = o(vx + 1, vy);
+                    if (!visited[noffset] && data[noffset] < threshold) {
+                      stack.push(noffset);
+                    }
+                  }
+                  if (vy > 0) {
+                    const noffset = o(vx, vy - 1);
+                    if (!visited[noffset] && data[noffset] < threshold) {
+                      stack.push(noffset);
+                    }
+                  }
+                  if (vy < yn1) {
+                    const noffset = o(vx, vy + 1);
+                    if (!visited[noffset] && data[noffset] < threshold) {
+                      stack.push(noffset);
+                    }
+                  }
+                }
+              }
+            }
+          }
+          return visited;
+        }
+        function floodfill3(tensor, threshold) {
+          const [xn, yn, zn] = tensor.space.dimensions;
+          const { dataOffset: o, getCoords: getCoords2 } = tensor.space;
+          const stack = [];
+          const coords = [0, 0, 0];
+          const xn1 = xn - 1;
+          const yn1 = yn - 1;
+          const zn1 = zn - 1;
+          const isBoundary = (x, y, z) => x === 0 || y === 0 || z === 0 || x === xn1 || y === yn1 || z === zn1;
+          const { data } = tensor;
+          const visited = new Uint8Array(data.length);
+          for (let z = 0; z < zn; z++) {
+            for (let y = 0; y < yn; y++) {
+              for (let x = 0; x < xn; x++) {
+                const offset2 = o(x, y, z);
+                if (data[offset2] < threshold && isBoundary(x, y, z) && !visited[offset2]) {
+                  stack.push(offset2);
+                  while (stack.length > 0) {
+                    const voffset = stack.pop();
+                    if (visited[voffset])
+                      continue;
+                    visited[voffset] = 1;
+                    getCoords2(voffset, coords);
+                    const [vx, vy, vz] = coords;
+                    if (vx > 0) {
+                      const noffset = o(vx - 1, vy, vz);
+                      if (!visited[noffset] && data[noffset] < threshold) {
+                        stack.push(noffset);
+                      }
+                    }
+                    if (vx < xn1) {
+                      const noffset = o(vx + 1, vy, vz);
+                      if (!visited[noffset] && data[noffset] < threshold) {
+                        stack.push(noffset);
+                      }
+                    }
+                    if (vy > 0) {
+                      const noffset = o(vx, vy - 1, vz);
+                      if (!visited[noffset] && data[noffset] < threshold) {
+                        stack.push(noffset);
+                      }
+                    }
+                    if (vy < yn1) {
+                      const noffset = o(vx, vy + 1, vz);
+                      if (!visited[noffset] && data[noffset] < threshold) {
+                        stack.push(noffset);
+                      }
+                    }
+                    if (vz > 0) {
+                      const noffset = o(vx, vy, vz - 1);
+                      if (!visited[noffset] && data[noffset] < threshold) {
+                        stack.push(noffset);
+                      }
+                    }
+                    if (vz < zn1) {
+                      const noffset = o(vx, vy, vz + 1);
+                      if (!visited[noffset] && data[noffset] < threshold) {
+                        stack.push(noffset);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          return visited;
+        }
+        function floodfill(tensor, threshold) {
+          switch (tensor.space.dimensions.length) {
+            case 1:
+              return floodfill1(tensor, threshold);
+            case 2:
+              return floodfill2(tensor, threshold);
+            case 3:
+              return floodfill3(tensor, threshold);
+            default:
+              throw new Error("Floodfill only implemented for rank-1, rank-2 and rank-3 tensors.");
+          }
+        }
+        Tensor2.floodfill = floodfill;
+        function floodfilledGet(mode, threshold, visited, tensor) {
+          const { dataOffset: o } = tensor.space;
+          const fillValue = threshold * 2;
+          switch (tensor.space.dimensions.length) {
+            case 1:
+              return mode === "outside" ? (data, i) => {
+                const v2 = data[i];
+                return v2 < threshold && visited[i] ? fillValue : v2;
+              } : (data, i) => {
+                const v2 = data[i];
+                return v2 < threshold && !visited[i] ? fillValue : v2;
+              };
+            case 2:
+              return mode === "outside" ? (data, i, j) => {
+                const e = o(i, j);
+                const v2 = data[e];
+                return v2 < threshold && visited[e] ? fillValue : v2;
+              } : (data, i, j) => {
+                const e = o(i, j);
+                const v2 = data[e];
+                return v2 < threshold && !visited[e] ? fillValue : v2;
+              };
+            case 3:
+              return mode === "outside" ? (data, i, j, k) => {
+                const e = o(i, j, k);
+                const v2 = data[e];
+                return v2 < threshold && visited[e] ? fillValue : v2;
+              } : (data, i, j, k) => {
+                const e = o(i, j, k);
+                const v2 = data[e];
+                return v2 < threshold && !visited[e] ? fillValue : v2;
+              };
+            default:
+              throw new Error("Floodfill only implemented for rank-1, rank-2 and rank-3 tensors.");
+          }
+        }
+        function createFloodfilled(tensor, threshold, mode) {
+          const visited = floodfill(tensor, threshold);
+          const newSpace = {
+            ...tensor.space,
+            get: floodfilledGet(mode, threshold, visited, tensor)
+          };
+          return Tensor2.create(newSpace, tensor.data);
+        }
+        Tensor2.createFloodfilled = createFloodfilled;
       })(Tensor || (Tensor = {}));
     }
   });
@@ -10533,73 +10746,6 @@
     }
   });
 
-  // node_modules/molstar/lib/mol-model/custom-property.js
-  function CustomPropertyDescriptor(desc) {
-    return desc;
-  }
-  var CustomProperties;
-  var init_custom_property = __esm({
-    "node_modules/molstar/lib/mol-model/custom-property.js"() {
-      init_mol_util();
-      (function(CustomPropertyDescriptor2) {
-        function getUUID(prop) {
-          if (!prop.__key) {
-            prop.__key = UUID.create22();
-          }
-          return prop.__key;
-        }
-        CustomPropertyDescriptor2.getUUID = getUUID;
-      })(CustomPropertyDescriptor || (CustomPropertyDescriptor = {}));
-      CustomProperties = class {
-        constructor() {
-          this._list = [];
-          this._set = /* @__PURE__ */ new Set();
-          this._refs = /* @__PURE__ */ new Map();
-          this._assets = /* @__PURE__ */ new Map();
-        }
-        get all() {
-          return this._list;
-        }
-        add(desc) {
-          if (this._set.has(desc))
-            return;
-          this._list.push(desc);
-          this._set.add(desc);
-        }
-        reference(desc, add) {
-          let refs = this._refs.get(desc) || 0;
-          refs += add ? 1 : -1;
-          this._refs.set(desc, Math.max(refs, 0));
-        }
-        hasReference(desc) {
-          return (this._refs.get(desc) || 0) > 0;
-        }
-        has(desc) {
-          return this._set.has(desc);
-        }
-        /** Sets assets for a prop, disposes of existing assets for that prop */
-        assets(desc, assets) {
-          const prevAssets = this._assets.get(desc);
-          if (prevAssets) {
-            for (const a5 of prevAssets)
-              a5.dispose();
-          }
-          if (assets)
-            this._assets.set(desc, assets);
-          else
-            this._assets.delete(desc);
-        }
-        /** Disposes of all assets of all props */
-        dispose() {
-          this._assets.forEach((assets) => {
-            for (const a5 of assets)
-              a5.dispose();
-          });
-        }
-      };
-    }
-  });
-
   // node_modules/molstar/lib/mol-math/linear-algebra/3d/vec2.js
   function Vec2() {
     return Vec2.zero();
@@ -12327,6 +12473,15 @@ ${subTree.join("\n")}`;
     h3 += h1;
     h4 += h1;
     return (h1 >>> 0).toString(16).padStart(8, "0") + (h2 >>> 0).toString(16).padStart(8, "0") + (h3 >>> 0).toString(16).padStart(8, "0") + (h4 >>> 0).toString(16).padStart(8, "0");
+  }
+  function mortonOrder3d(x, y, z) {
+    let out = 0;
+    for (let i = 0; i < 21; ++i) {
+      out |= (x >> i & 1) << 3 * i + 2;
+      out |= (y >> i & 1) << 3 * i + 1;
+      out |= (z >> i & 1) << 3 * i;
+    }
+    return out;
   }
   var ObjectHasher256, _Hasher256, Fnv256Base, MultTmp1, MultTmp2, _8digit_padding;
   var init_hash_functions = __esm({
@@ -15305,7 +15460,7 @@ ${subTree.join("\n")}`;
   var SaccharideNames;
   var init_saccharides = __esm({
     "node_modules/molstar/lib/mol-model/structure/model/types/saccharides.js"() {
-      SaccharideNames = /* @__PURE__ */ new Set(["145", "147", "149", "289", "291", "293", "445", "475", "491", "510", "604", "045", "05L", "07E", "07Y", "08U", "09X", "0AT", "0BD", "0H0", "0HX", "0LP", "0MK", "0NZ", "0TS", "0UB", "0V4", "0WK", "0XY", "0YT", "10M", "12E", "14T", "15L", "16F", "16G", "16O", "17T", "18D", "18O", "18T", "1AR", "1BW", "1CF", "1FT", "1GL", "1GN", "1JB", "1LL", "1NA", "1S3", "1S4", "1SD", "1X4", "20S", "20X", "22O", "22S", "23V", "24S", "25E", "26M", "26O", "26Q", "26R", "26V", "26W", "26Y", "27C", "2DG", "2DR", "2F8", "2FG", "2FL", "2FP", "2GL", "2GS", "2H5", "2HA", "2M4", "2M5", "2M8", "2OS", "2SI", "2WP", "2WS", "32O", "34V", "38J", "3BU", "3CM", "3DO", "3DY", "3FM", "3GR", "3HD", "3J3", "3J4", "3LJ", "3LR", "3MF", "3MG", "3MK", "3R3", "3S6", "3SA", "3YW", "40J", "42D", "44S", "46D", "46M", "46Z", "48Z", "49A", "49S", "49T", "49V", "4AM", "4CQ", "4GC", "4GL", "4GP", "4JA", "4N2", "4NN", "4QY", "4R1", "4RS", "4SG", "4U0", "4U1", "4U2", "4UZ", "4V5", "50A", "51N", "56N", "57S", "5DI", "5GF", "5GO", "5II", "5KQ", "5KS", "5KT", "5KV", "5L2", "5L3", "5LS", "5LT", "5MM", "5N6", "5QP", "5RP", "5SA", "5SP", "5TH", "5TJ", "5TK", "5TM", "61J", "62I", "64K", "66O", "6BG", "6C2", "6DM", "6GB", "6GP", "6GR", "6K3", "6KH", "6KL", "6KS", "6KU", "6KW", "6LA", "6LS", "6LW", "6MJ", "6MN", "6PG", "6PY", "6PZ", "6S2", "6SA", "6UD", "6Y6", "6YR", "6ZC", "73E", "79J", "7CV", "7D1", "7GP", "7JZ", "7K2", "7K3", "7NU", "7SA", "83Y", "89Y", "8B7", "8B9", "8EX", "8GA", "8GG", "8GP", "8I4", "8LM", "8LR", "8OQ", "8PK", "8S0", "8YV", "95Z", "96O", "98U", "9AM", "9C1", "9CD", "9GP", "9KJ", "9MR", "9OK", "9PG", "9QG", "9QZ", "9RN", "9S7", "9SG", "9SJ", "9SM", "9SP", "9T1", "9T7", "9VP", "9WJ", "9WN", "9WZ", "9YW", "A0K", "A1AIO", "A1APB", "A1APC", "A1APD", "A1CCV", "A1CCW", "A1EAX", "A1EFW", "A1EGT", "A1EGV", "A1EGW", "A1EGX", "A1EGY", "A1EJ0", "A1EJ2", "A1EKO", "A1EN6", "A1H03", "A1H0P", "A1H0Z", "A1H10", "A1H1B", "A1H1F", "A1H1V", "A1I9U", "A1ID6", "A1IH4", "A1IZL", "A1JAQ", "A1L1P", "A1Q", "A2G", "A5C", "A6P", "AAL", "AAO", "ABC", "ABD", "ABE", "ABF", "ABL", "AC1", "ACG", "ACR", "ACX", "ADA", "ADG", "ADR", "AF1", "AFD", "AFL", "AFO", "AFP", "AFR", "AGC", "AGH", "AGL", "AGR", "AH2", "AH8", "AHG", "AHM", "AHR", "AIG", "ALL", "ALX", "AMG", "AMN", "AMU", "AMV", "ANA", "AOG", "AOS", "AQA", "ARA", "ARB", "ARE", "ARI", "ARW", "ASC", "ASG", "ASO", "AXP", "AXR", "AY9", "AZC", "B0D", "B16", "B1H", "B1N", "B2G", "B4G", "B6D", "B7G", "B8D", "B9D", "BBK", "BBV", "BCD", "BCW", "BDF", "BDG", "BDP", "BDR", "BDZ", "BEM", "BFN", "BFP", "BG6", "BG8", "BGC", "BGL", "BGN", "BGP", "BGS", "BHG", "BM3", "BM7", "BMA", "BMX", "BND", "BNG", "BNX", "BO1", "BOG", "BQY", "BRI", "BS7", "BTG", "BTU", "BW3", "BWG", "BXF", "BXP", "BXX", "BXY", "BZD", "C3B", "C3G", "C3X", "C4B", "C4W", "C4X", "C5X", "CAP", "CBF", "CBI", "CBK", "CDR", "CE5", "CE6", "CE8", "CEG", "CEX", "CEY", "CEZ", "CGF", "CJB", "CKB", "CKP", "CNP", "CR1", "CR6", "CRA", "CT3", "CTO", "CTR", "CTT", "D0N", "D1M", "D5E", "D6G", "DAF", "DAG", "DAN", "DDA", "DDB", "DDL", "DEG", "DEL", "DFR", "DFX", "DG0", "DGC", "DGD", "DGM", "DGO", "DGS", "DGU", "DIG", "DJB", "DJE", "DK4", "DKX", "DKZ", "DL6", "DLD", "DLF", "DLG", "DMU", "DNO", "DO8", "DOM", "DP5", "DPC", "DQQ", "DQR", "DR2", "DR3", "DR4", "DR5", "DRI", "DSR", "DT6", "DVC", "DYM", "E3M", "E4P", "E5G", "EAG", "EBG", "EBQ", "ED6", "EEN", "EEQ", "EGA", "EJT", "EMP", "EMZ", "EPG", "EQP", "EQV", "ERE", "ERI", "ETT", "EUS", "F1P", "F1X", "F55", "F58", "F6P", "F8X", "FBP", "FCA", "FCB", "FCT", "FDP", "FDQ", "FFC", "FFX", "FIF", "FIX", "FK9", "FKD", "FMF", "FMO", "FNG", "FNY", "FRU", "FSA", "FSI", "FSM", "FSR", "FSW", "FU4", "FUB", "FUC", "FUD", "FUF", "FUL", "FUY", "FVQ", "FX1", "FYJ", "G0S", "G16", "G1P", "G20", "G28", "G2F", "G3F", "G3I", "G4D", "G4S", "G6D", "G6P", "G6S", "G7P", "G8Z", "GAA", "GAC", "GAD", "GAF", "GAL", "GAT", "GBH", "GC1", "GC4", "GC9", "GCB", "GCD", "GCN", "GCO", "GCS", "GCT", "GCU", "GCV", "GCW", "GDA", "GDL", "GE1", "GE3", "GFP", "GIV", "GL0", "GL1", "GL2", "GL4", "GL5", "GL6", "GL7", "GL9", "GLA", "GLB", "GLC", "GLD", "GLF", "GLG", "GLO", "GLP", "GLS", "GLT", "GLW", "GM0", "GMB", "GMH", "GMT", "GMZ", "GN1", "GN4", "GNS", "GNX", "GP0", "GP1", "GP4", "GPH", "GPK", "GPM", "GPO", "GPQ", "GPU", "GPV", "GPW", "GQ1", "GRF", "GRX", "GS1", "GS4", "GS9", "GSA", "GSD", "GTE", "GTH", "GTK", "GTM", "GTR", "GU0", "GU1", "GU2", "GU3", "GU4", "GU5", "GU6", "GU8", "GU9", "GUF", "GUL", "GUP", "GUZ", "GXL", "GXV", "GYE", "GYG", "GYP", "GYU", "GYV", "GZL", "H1M", "H1S", "H2P", "H3S", "H53", "H6Q", "H6Z", "HBZ", "HD4", "HDL", "HLA", "HMS", "HNV", "HNW", "HSG", "HSH", "HSJ", "HSQ", "HSR", "HSU", "HSX", "HSY", "HSZ", "HTG", "HTM", "HVC", "I57", "IAB", "IDC", "IDF", "IDG", "IDR", "IDS", "IDT", "IDU", "IDX", "IDY", "IEM", "IN1", "IPT", "ISD", "ISL", "ISX", "IVG", "IXD", "J5B", "JFZ", "JHM", "JLT", "JRV", "JS2", "JSV", "JV4", "JVA", "JVS", "JZR", "K5B", "K99", "KBA", "KBG", "KD5", "KDA", "KDB", "KDD", "KDE", "KDF", "KDM", "KDN", "KDO", "KDR", "KFN", "KG1", "KGM", "KHP", "KME", "KO1", "KO2", "KOT", "KQC", "KTU", "L1L", "L6N", "L6S", "L6T", "LAG", "LAH", "LAI", "LAK", "LAO", "LAT", "LB2", "LBS", "LBT", "LCN", "LDY", "LEC", "LER", "LFC", "LFR", "LGC", "LGU", "LKA", "LKS", "LM2", "LMO", "LMT", "LMU", "LNV", "LOG", "LOX", "LPK", "LRH", "LSM", "LTG", "LTM", "LVO", "LVZ", "LXB", "LXC", "LXZ", "LZ0", "M1F", "M1P", "M2F", "M3M", "M3N", "M55", "M6D", "M6P", "M7B", "M7P", "M8C", "MA1", "MA2", "MA3", "MA8", "MAB", "MAF", "MAG", "MAL", "MAN", "MAT", "MAV", "MAW", "MBE", "MBF", "MBG", "MCU", "MDA", "MDP", "MFA", "MFB", "MFU", "MG5", "MGA", "MGC", "MGL", "MGS", "MJJ", "MLB", "MLR", "MMA", "MMN", "MN0", "MNA", "MQG", "MQT", "MRH", "MRP", "MSX", "MTT", "MUB", "MUG", "MUR", "MVP", "MXY", "MXZ", "MYG", "N1L", "N3U", "N9S", "NA1", "NAA", "NAG", "NBG", "NBX", "NBY", "NDG", "NED", "NFG", "NG1", "NG6", "NGA", "NGB", "NGC", "NGE", "NGF", "NGK", "NGL", "NGR", "NGS", "NGY", "NGZ", "NHF", "NLC", "NM6", "NM9", "NNG", "NOJ", "NPF", "NSQ", "NT1", "NTF", "NTO", "NTP", "NXD", "NYT", "O1G", "OAK", "OEL", "OI7", "OPM", "ORP", "OSU", "OTG", "OTN", "OTU", "OX2", "P53", "P6P", "P8E", "PA1", "PA5", "PAV", "PDX", "PH5", "PKM", "PNA", "PNG", "PNJ", "PNW", "PPC", "PRP", "PSG", "PSJ", "PSV", "PTQ", "PUF", "PZU", "QDK", "QIF", "QKH", "QPS", "QV4", "R1P", "R1X", "R2B", "R2G", "R5P", "RAA", "RAE", "RAF", "RAM", "RAO", "RAT", "RB5", "RBL", "RCD", "RDP", "REL", "RER", "RF5", "RG1", "RGG", "RHA", "RHC", "RI2", "RIB", "RIP", "RM4", "RNS", "RNT", "ROB", "ROR", "RP3", "RP5", "RP6", "RPA", "RR7", "RRJ", "RRY", "RST", "RTG", "RTV", "RUB", "RUG", "RUU", "RV7", "RVG", "RVM", "RWI", "RY7", "RZM", "S6P", "S7P", "S81", "SA0", "SCG", "SCR", "SDD", "SDY", "SEJ", "SF6", "SF9", "SFJ", "SFU", "SG4", "SG5", "SG6", "SG7", "SGA", "SGC", "SGD", "SGN", "SGS", "SHB", "SHD", "SHG", "SI3", "SIA", "SID", "SIO", "SIZ", "SLB", "SLM", "SLT", "SMD", "SN5", "SNG", "SOE", "SOG", "SOL", "SOR", "SR1", "SSG", "SSH", "STW", "STZ", "SUC", "SUP", "SUS", "SWE", "SZZ", "T68", "T6D", "T6P", "T6T", "TA6", "TAG", "TCB", "TCG", "TDG", "TEU", "TF0", "TFU", "TGA", "TGK", "TGR", "TGY", "TH1", "TM5", "TM6", "TM9", "TMR", "TMX", "TNX", "TOA", "TOC", "TQY", "TRE", "TRV", "TS8", "TT7", "TTV", "TTZ", "TU4", "TUG", "TUJ", "TUP", "TUR", "TVD", "TVG", "TVM", "TVS", "TVV", "TVY", "TW7", "TWA", "TWD", "TWG", "TWJ", "TWY", "TXB", "TY6", "TYV", "U1Y", "U2A", "U2D", "U63", "U8V", "U97", "U9A", "U9D", "U9G", "U9J", "U9M", "UAP", "UBH", "UBO", "UCD", "UDC", "UEA", "V3M", "V3P", "V71", "VDF", "VG1", "VJ1", "VJ4", "VKN", "VTB", "W9T", "WIA", "WKO", "WKT", "WOO", "WT8", "WUN", "WZ1", "WZ2", "WZ4", "X0X", "X1P", "X1X", "X2F", "X2Y", "X34", "X4S", "X5S", "X6N", "X6X", "X6Y", "X6Z", "XBP", "XDP", "XDX", "XGP", "XIL", "XIQ", "XKJ", "XLF", "XLS", "XMM", "XS2", "XUL", "XXM", "XXR", "XXX", "XY6", "XY9", "XYB", "XYF", "XYL", "XYP", "XYS", "XYT", "XYZ", "YDR", "YIO", "YJM", "YKR", "YO5", "YX0", "YX1", "YYB", "YYD", "YYH", "YYJ", "YYK", "YYM", "YYQ", "YYR", "YZ0", "YZT", "Z0F", "Z15", "Z16", "Z2D", "Z2T", "Z3K", "Z3L", "Z3Q", "Z3U", "Z4K", "Z4R", "Z4S", "Z4U", "Z4V", "Z4W", "Z4Y", "Z57", "Z5J", "Z5L", "Z61", "Z6G", "Z6H", "Z6J", "Z6W", "Z8H", "Z8T", "Z9D", "Z9E", "Z9H", "Z9K", "Z9L", "Z9M", "Z9N", "Z9W", "ZB0", "ZB1", "ZB2", "ZB3", "ZCD", "ZCZ", "ZD0", "ZDC", "ZDM", "ZDO", "ZEE", "ZEL", "ZGE", "ZMR", "UMQ", "SQD"]);
+      SaccharideNames = /* @__PURE__ */ new Set(["145", "147", "149", "289", "291", "293", "445", "475", "491", "510", "604", "045", "05L", "07E", "07Y", "08U", "09X", "0AT", "0BD", "0H0", "0HX", "0LP", "0MK", "0NZ", "0TS", "0UB", "0V4", "0WK", "0XY", "0YT", "10M", "12E", "14T", "15L", "16F", "16G", "16O", "17T", "18D", "18O", "18T", "1AR", "1BW", "1CF", "1FT", "1GL", "1GN", "1JB", "1LL", "1NA", "1S3", "1S4", "1SD", "1X4", "20S", "20X", "22O", "22S", "23V", "24S", "25E", "26M", "26O", "26Q", "26R", "26V", "26W", "26Y", "27C", "2DG", "2DR", "2F8", "2FG", "2FL", "2FP", "2GL", "2GS", "2H5", "2HA", "2M4", "2M5", "2M8", "2OS", "2SI", "2WP", "2WS", "32O", "34V", "38J", "3BU", "3CM", "3DO", "3DY", "3FM", "3GR", "3HD", "3J3", "3J4", "3LJ", "3LR", "3MF", "3MG", "3MK", "3R3", "3S6", "3SA", "3YW", "40J", "42D", "44S", "46D", "46M", "46Z", "48Z", "49A", "49S", "49T", "49V", "4AM", "4CQ", "4GC", "4GL", "4GP", "4JA", "4N2", "4NN", "4QY", "4R1", "4RS", "4SG", "4U0", "4U1", "4U2", "4UZ", "4V5", "50A", "51N", "56N", "57S", "5DI", "5GF", "5GO", "5II", "5KQ", "5KS", "5KT", "5KV", "5L2", "5L3", "5LS", "5LT", "5MM", "5N6", "5QP", "5RP", "5SA", "5SP", "5TH", "5TJ", "5TK", "5TM", "61J", "62I", "64K", "66O", "6BG", "6C2", "6DM", "6GB", "6GP", "6GR", "6K3", "6KH", "6KL", "6KS", "6KU", "6KW", "6LA", "6LS", "6LW", "6MJ", "6MN", "6PG", "6PY", "6PZ", "6S2", "6SA", "6UD", "6Y6", "6YR", "6ZC", "73E", "79J", "7CV", "7D1", "7GP", "7JZ", "7K2", "7K3", "7NU", "7SA", "83Y", "89Y", "8B7", "8B9", "8EX", "8GA", "8GG", "8GP", "8I4", "8LM", "8LR", "8OQ", "8PK", "8S0", "8YV", "95Z", "96O", "98U", "9AM", "9C1", "9CD", "9GP", "9KJ", "9MR", "9OK", "9PG", "9QG", "9QZ", "9RN", "9S7", "9SG", "9SJ", "9SM", "9SP", "9T1", "9T7", "9VP", "9WJ", "9WN", "9WZ", "9YW", "A0K", "A1AIO", "A1APB", "A1APC", "A1APD", "A1CCV", "A1CCW", "A1CWR", "A1EAX", "A1EFW", "A1EGT", "A1EGV", "A1EGW", "A1EGX", "A1EGY", "A1EJ0", "A1EJ2", "A1EKO", "A1EN6", "A1H03", "A1H0P", "A1H0Z", "A1H10", "A1H1B", "A1H1F", "A1H1V", "A1I0L", "A1I9U", "A1ID6", "A1IH4", "A1IVP", "A1IZL", "A1JAQ", "A1L1P", "A1Q", "A2G", "A5C", "A6P", "AAL", "AAO", "ABC", "ABD", "ABE", "ABF", "ABL", "AC1", "ACG", "ACR", "ACX", "ADA", "ADG", "ADR", "AF1", "AFD", "AFL", "AFO", "AFP", "AFR", "AGC", "AGH", "AGL", "AGR", "AH2", "AH8", "AHG", "AHM", "AHR", "AIG", "ALL", "ALX", "AMG", "AMN", "AMU", "AMV", "ANA", "AOG", "AOS", "AQA", "ARA", "ARB", "ARE", "ARI", "ARW", "ASC", "ASG", "ASO", "AXP", "AXR", "AY9", "AZC", "B0D", "B16", "B1H", "B1N", "B2G", "B4G", "B6D", "B7G", "B8D", "B9D", "BBK", "BBV", "BCD", "BCW", "BDF", "BDG", "BDP", "BDR", "BDZ", "BEM", "BFN", "BFP", "BG6", "BG8", "BGC", "BGL", "BGN", "BGP", "BGS", "BHG", "BM3", "BM7", "BMA", "BMX", "BND", "BNG", "BNX", "BO1", "BOG", "BQY", "BRI", "BS7", "BTG", "BTU", "BW3", "BWG", "BXF", "BXP", "BXX", "BXY", "BZD", "C3B", "C3G", "C3X", "C4B", "C4W", "C4X", "C5X", "CAP", "CBF", "CBI", "CBK", "CDR", "CE5", "CE6", "CE8", "CEG", "CEX", "CEY", "CEZ", "CGF", "CJB", "CKB", "CKP", "CNP", "CR1", "CR6", "CRA", "CT3", "CTO", "CTR", "CTT", "D0N", "D1M", "D5E", "D6G", "DAF", "DAG", "DAN", "DDA", "DDB", "DDL", "DEG", "DEL", "DFR", "DFX", "DG0", "DGC", "DGD", "DGM", "DGO", "DGS", "DGU", "DIG", "DJB", "DJE", "DK4", "DKX", "DKZ", "DL6", "DLD", "DLF", "DLG", "DMU", "DNO", "DO8", "DOM", "DP5", "DPC", "DQQ", "DQR", "DR2", "DR3", "DR4", "DR5", "DRI", "DSR", "DT6", "DVC", "DYM", "E3M", "E4P", "E5G", "EAG", "EBG", "EBQ", "ED6", "EEN", "EEQ", "EGA", "EJT", "EMP", "EMZ", "EPG", "EQP", "EQV", "ERE", "ERI", "ETT", "EUS", "F1P", "F1X", "F55", "F58", "F6P", "F8X", "FBP", "FCA", "FCB", "FCT", "FDP", "FDQ", "FFC", "FFX", "FIF", "FIX", "FK9", "FKD", "FMF", "FMO", "FNG", "FNY", "FRU", "FSA", "FSI", "FSM", "FSR", "FSW", "FU4", "FUB", "FUC", "FUD", "FUF", "FUL", "FUY", "FVQ", "FX1", "FYJ", "G0S", "G16", "G1P", "G20", "G28", "G2F", "G3F", "G3I", "G4D", "G4S", "G6D", "G6P", "G6S", "G7P", "G8Z", "GAA", "GAC", "GAD", "GAF", "GAL", "GAT", "GBH", "GC1", "GC4", "GC9", "GCB", "GCD", "GCN", "GCO", "GCS", "GCT", "GCU", "GCV", "GCW", "GDA", "GDL", "GE1", "GE3", "GFP", "GIV", "GL0", "GL1", "GL2", "GL4", "GL5", "GL6", "GL7", "GL9", "GLA", "GLB", "GLC", "GLD", "GLF", "GLG", "GLO", "GLP", "GLS", "GLT", "GLW", "GM0", "GMB", "GMH", "GMT", "GMZ", "GN1", "GN4", "GNS", "GNX", "GP0", "GP1", "GP4", "GPH", "GPK", "GPM", "GPO", "GPQ", "GPU", "GPV", "GPW", "GQ1", "GRF", "GRX", "GS1", "GS4", "GS9", "GSA", "GSD", "GTE", "GTH", "GTK", "GTM", "GTR", "GU0", "GU1", "GU2", "GU3", "GU4", "GU5", "GU6", "GU8", "GU9", "GUF", "GUL", "GUP", "GUZ", "GXL", "GXV", "GYE", "GYG", "GYP", "GYU", "GYV", "GZL", "H1M", "H1S", "H2P", "H3S", "H53", "H6Q", "H6Z", "HBZ", "HD4", "HDL", "HLA", "HMS", "HNV", "HNW", "HSG", "HSH", "HSJ", "HSQ", "HSR", "HSU", "HSX", "HSY", "HSZ", "HTG", "HTM", "HVC", "I57", "IAB", "IDC", "IDF", "IDG", "IDR", "IDS", "IDT", "IDU", "IDX", "IDY", "IEM", "IN1", "IPT", "ISD", "ISL", "ISX", "IVG", "IXD", "J5B", "JFZ", "JHM", "JLT", "JRV", "JS2", "JSV", "JV4", "JVA", "JVS", "JZR", "K5B", "K99", "KBA", "KBG", "KD5", "KDA", "KDB", "KDD", "KDE", "KDF", "KDM", "KDN", "KDO", "KDR", "KFN", "KG1", "KGM", "KHP", "KME", "KO1", "KO2", "KOT", "KQC", "KTU", "L1L", "L6N", "L6S", "L6T", "LAG", "LAH", "LAI", "LAK", "LAO", "LAT", "LB2", "LBS", "LBT", "LCN", "LDY", "LEC", "LER", "LFC", "LFR", "LGC", "LGU", "LKA", "LKS", "LM2", "LMO", "LMT", "LMU", "LNV", "LOG", "LOX", "LPK", "LRH", "LSM", "LTG", "LTM", "LVO", "LVZ", "LXB", "LXC", "LXZ", "LZ0", "M1F", "M1P", "M2F", "M3M", "M3N", "M55", "M6D", "M6P", "M7B", "M7P", "M8C", "MA1", "MA2", "MA3", "MA8", "MAB", "MAF", "MAG", "MAL", "MAN", "MAT", "MAV", "MAW", "MBE", "MBF", "MBG", "MCU", "MDA", "MDP", "MFA", "MFB", "MFU", "MG5", "MGA", "MGC", "MGL", "MGS", "MJJ", "MLB", "MLR", "MMA", "MMN", "MN0", "MNA", "MQG", "MQT", "MRH", "MRP", "MSX", "MTT", "MUB", "MUG", "MUR", "MVP", "MXY", "MXZ", "MYG", "N1L", "N3U", "N9S", "NA1", "NAA", "NAG", "NBG", "NBX", "NBY", "NDG", "NED", "NFG", "NG1", "NG6", "NGA", "NGB", "NGC", "NGE", "NGF", "NGK", "NGL", "NGR", "NGS", "NGY", "NGZ", "NHF", "NLC", "NM6", "NM9", "NNG", "NOJ", "NPF", "NSQ", "NT1", "NTF", "NTO", "NTP", "NXD", "NYT", "O1G", "OAK", "OEL", "OI7", "OPM", "ORP", "OSU", "OTG", "OTN", "OTU", "OX2", "P53", "P6P", "P8E", "PA1", "PA5", "PAV", "PDX", "PH5", "PKM", "PNA", "PNG", "PNJ", "PNW", "PPC", "PRP", "PSG", "PSJ", "PSV", "PTQ", "PUF", "PZU", "QDK", "QIF", "QKH", "QPS", "QV4", "R1P", "R1X", "R2B", "R2G", "R5P", "RAA", "RAE", "RAF", "RAM", "RAO", "RAT", "RB5", "RBL", "RCD", "RDP", "REL", "RER", "RF5", "RG1", "RGG", "RHA", "RHC", "RI2", "RIB", "RIP", "RM4", "RNS", "RNT", "ROB", "ROR", "RP3", "RP5", "RP6", "RPA", "RR7", "RRJ", "RRY", "RST", "RTG", "RTV", "RUB", "RUG", "RUU", "RV7", "RVG", "RVM", "RWI", "RY7", "RZM", "S6P", "S7P", "S81", "SA0", "SCG", "SCR", "SDD", "SDY", "SEJ", "SF6", "SF9", "SFJ", "SFU", "SG4", "SG5", "SG6", "SG7", "SGA", "SGC", "SGD", "SGN", "SGS", "SHB", "SHD", "SHG", "SI3", "SIA", "SID", "SIO", "SIZ", "SLB", "SLM", "SLT", "SMD", "SN5", "SNG", "SOE", "SOG", "SOL", "SOR", "SR1", "SSG", "SSH", "STW", "STZ", "SUC", "SUP", "SUS", "SWE", "SZZ", "T68", "T6D", "T6P", "T6T", "TA6", "TAG", "TCB", "TCG", "TDG", "TEU", "TF0", "TFU", "TGA", "TGK", "TGR", "TGY", "TH1", "TM5", "TM6", "TM9", "TMR", "TMX", "TNX", "TOA", "TOC", "TQY", "TRE", "TRV", "TS8", "TT7", "TTV", "TTZ", "TU4", "TUG", "TUJ", "TUP", "TUR", "TVD", "TVG", "TVM", "TVS", "TVV", "TVY", "TW7", "TWA", "TWD", "TWG", "TWJ", "TWY", "TXB", "TY6", "TYV", "U1Y", "U2A", "U2D", "U63", "U8V", "U97", "U9A", "U9D", "U9G", "U9J", "U9M", "UAP", "UBH", "UBO", "UCD", "UDC", "UEA", "V3M", "V3P", "V71", "VDF", "VG1", "VJ1", "VJ4", "VKN", "VTB", "W9T", "WIA", "WKO", "WKT", "WOO", "WT8", "WUN", "WZ1", "WZ2", "WZ4", "X0X", "X1P", "X1X", "X2F", "X2Y", "X34", "X4S", "X5S", "X6N", "X6X", "X6Y", "X6Z", "XBP", "XDP", "XDX", "XGP", "XIL", "XIQ", "XKJ", "XLF", "XLS", "XMM", "XS2", "XUL", "XXM", "XXR", "XXX", "XY6", "XY9", "XYB", "XYF", "XYL", "XYP", "XYS", "XYT", "XYZ", "YDR", "YIO", "YJM", "YKR", "YO5", "YX0", "YX1", "YYB", "YYD", "YYH", "YYJ", "YYK", "YYM", "YYQ", "YYR", "YZ0", "YZT", "Z0F", "Z15", "Z16", "Z2D", "Z2T", "Z3K", "Z3L", "Z3Q", "Z3U", "Z4K", "Z4R", "Z4S", "Z4U", "Z4V", "Z4W", "Z4Y", "Z57", "Z5J", "Z5L", "Z61", "Z6G", "Z6H", "Z6J", "Z6W", "Z8H", "Z8T", "Z9D", "Z9E", "Z9H", "Z9K", "Z9L", "Z9M", "Z9N", "Z9W", "ZB0", "ZB1", "ZB2", "ZB3", "ZCD", "ZCZ", "ZD0", "ZDC", "ZDM", "ZDO", "ZEE", "ZEL", "ZGE", "ZMR", "UMQ", "SQD"]);
     }
   });
 
@@ -15860,7 +16015,7 @@ ${subTree.join("\n")}`;
   var LipidNames;
   var init_lipids = __esm({
     "node_modules/molstar/lib/mol-model/structure/model/types/lipids.js"() {
-      LipidNames = /* @__PURE__ */ new Set(["DAPC", "DBPC", "DFPC", "DGPC", "DIPC", "DLPC", "DNPC", "DOPC", "DPPC", "DRPC", "DTPC", "DVPC", "DXPC", "DYPC", "LPPC", "PAPC", "PEPC", "PGPC", "PIPC", "POPC", "PRPC", "PUPC", "DAPE", "DBPE", "DFPE", "DGPE", "DIPE", "DLPE", "DNPE", "DOPE", "DPPE", "DRPE", "DTPE", "DUPE", "DVPE", "DXPE", "DYPE", "LPPE", "PAPE", "PGPE", "PIPE", "POPE", "PQPE", "PRPE", "PUPE", "DAPS", "DBPS", "DFPS", "DGPS", "DIPS", "DLPS", "DNPS", "DOPS", "DPPS", "DRPS", "DTPS", "DUPS", "DVPS", "DXPS", "DYPS", "LPPS", "PAPS", "PGPS", "PIPS", "POPS", "PQPS", "PRPS", "PUPS", "DAPA", "DBPA", "DFPA", "DGPA", "DIPA", "DLPA", "DNPA", "DOPA", "DPPA", "DRPA", "DTPA", "DVPA", "DXPA", "DYPA", "LPPA", "PAPA", "PGPA", "PIPA", "POPA", "PRPA", "PUPA", "DAPG", "DBPG", "DFPG", "DGPG", "DIPG", "DLPG", "DNPG", "DOPG", "DPPG", "DRPG", "DTPG", "DVPG", "DXPG", "DYPG", "LPPG", "PAPG", "PGPG", "PIPG", "POPG", "PRPG", "DMPC", "DPP", "DPPI", "PAPI", "PIPI", "POP", "POPI", "PUPI", "PVP", "PVPI", "PADG", "PIDG", "PODG", "PUDG", "PVDG", "APC", "CPC", "IPC", "LPC", "OPC", "PPC", "TPC", "UPC", "VPC", "BNSM", "DBSM", "DPSM", "DXSM", "PGSM", "PNSM", "POSM", "PVSM", "XNSM", "DPCE", "DXCE", "PNCE", "XNCE"]);
+      LipidNames = /* @__PURE__ */ new Set(["DAPC", "DBPC", "DFPC", "DGPC", "DIPC", "DLPC", "DNPC", "DOPC", "DPPC", "DRPC", "DTPC", "DVPC", "DXPC", "DYPC", "LPPC", "PAPC", "PEPC", "PGPC", "PIPC", "POPC", "PRPC", "PUPC", "DAPE", "DBPE", "DFPE", "DGPE", "DIPE", "DLPE", "DNPE", "DOPE", "DPPE", "DRPE", "DTPE", "DUPE", "DVPE", "DXPE", "DYPE", "LPPE", "PAPE", "PGPE", "PIPE", "POPE", "PQPE", "PRPE", "PUPE", "DAPS", "DBPS", "DFPS", "DGPS", "DIPS", "DLPS", "DNPS", "DOPS", "DPPS", "DRPS", "DTPS", "DUPS", "DVPS", "DXPS", "DYPS", "LPPS", "PAPS", "PGPS", "PIPS", "POPS", "PQPS", "PRPS", "PUPS", "DAPA", "DBPA", "DFPA", "DGPA", "DIPA", "DLPA", "DNPA", "DOPA", "DPPA", "DRPA", "DTPA", "DVPA", "DXPA", "DYPA", "LPPA", "PAPA", "PGPA", "PIPA", "POPA", "PRPA", "PUPA", "DAPG", "DBPG", "DFPG", "DGPG", "DIPG", "DLPG", "DNPG", "DOPG", "DPPG", "DRPG", "DTPG", "DVPG", "DXPG", "DYPG", "LPPG", "PAPG", "PGPG", "PIPG", "POPG", "PRPG", "DMPC", "DPP", "DPPI", "PAPI", "PIPI", "POP", "POPI", "PUPI", "PVP", "PVPI", "PADG", "PIDG", "PODG", "PUDG", "PVDG", "APC", "CPC", "IPC", "LPC", "OPC", "PPC", "TPC", "UPC", "VPC", "BNSM", "DBSM", "DPSM", "DXSM", "PGSM", "PNSM", "POSM", "PVSM", "XNSM", "DPCE", "DXCE", "PNCE", "XNCE", "PA", "ST", "OL", "LEO", "LEN", "AR", "DHA", "PC", "PE", "PS", "PH-", "P2-", "PGR", "PGS", "PI", "CHL"]);
     }
   });
 
@@ -16016,7 +16171,7 @@ ${subTree.join("\n")}`;
   function isProtein(moleculeType) {
     return moleculeType === MoleculeType.Protein;
   }
-  var _esCache, _elementByAtomicNumber, EntityType, MoleculeType, PolymerType, PolymerTypeAtomRoleId, ProteinBackboneAtoms, NucleicBackboneAtoms, DProteinComponentTypeNames, LProteinComponentTypeNames, GammaProteinComponentTypeNames, BetaProteinComponentTypeNames, ProteinTerminusComponentTypeNames, OtherProteinComponentTypeNames, ProteinComponentTypeNames, DNAComponentTypeNames, RNAComponentTypeNames, SaccharideComponentTypeNames, OtherComponentTypeNames, IonComponentTypeNames, LipidComponentTypeNames, WaterNames, AminoAcidNamesL, AminoAcidNamesD, AminoAcidNames, CommonProteinCaps, RnaBaseNames, DnaBaseNames, PeptideBaseNames, BaseNames, PolymerNames, SecondaryStructureType, BondType, ResidueHydrophobicity;
+  var _esCache, _elementByAtomicNumber, EntityType, MoleculeType, PolymerType, PolymerTypeAtomRoleId, ProteinBackboneAtoms, NucleicBackboneAtoms, TraceAtoms, DProteinComponentTypeNames, LProteinComponentTypeNames, GammaProteinComponentTypeNames, BetaProteinComponentTypeNames, ProteinTerminusComponentTypeNames, OtherProteinComponentTypeNames, ProteinComponentTypeNames, DNAComponentTypeNames, RNAComponentTypeNames, SaccharideComponentTypeNames, OtherComponentTypeNames, IonComponentTypeNames, LipidComponentTypeNames, WaterNames, AminoAcidNamesL, AminoAcidNamesD, AminoAcidNames, CommonProteinCaps, RnaBaseNames, DnaBaseNames, PeptideBaseNames, BaseNames, PolymerNames, SecondaryStructureType, BondType, ResidueHydrophobicity;
   var init_types = __esm({
     "node_modules/molstar/lib/mol-model/structure/model/types.js"() {
       init_bit_flags();
@@ -16154,7 +16309,9 @@ ${subTree.join("\n")}`;
         "HA",
         "HN",
         "HXT",
-        "BB"
+        "CA1",
+        "BB",
+        "BAS"
       ]);
       NucleicBackboneAtoms = /* @__PURE__ */ new Set([
         "P",
@@ -16190,6 +16347,16 @@ ${subTree.join("\n")}`;
         "C3*",
         "C4*",
         "C5*"
+      ]);
+      TraceAtoms = /* @__PURE__ */ new Set([
+        "CA",
+        "CA1",
+        "BB",
+        "BAS",
+        "O3'",
+        "O3*",
+        "N4'",
+        "N4*"
       ]);
       DProteinComponentTypeNames = /* @__PURE__ */ new Set([
         "d-peptide linking",
@@ -16791,6 +16958,73 @@ ${subTree.join("\n")}`;
         }
         IndexPairBonds2.getEdgeIndexForOperators = getEdgeIndexForOperators;
       })(IndexPairBonds || (IndexPairBonds = {}));
+    }
+  });
+
+  // node_modules/molstar/lib/mol-model/custom-property.js
+  function CustomPropertyDescriptor(desc) {
+    return desc;
+  }
+  var CustomProperties;
+  var init_custom_property = __esm({
+    "node_modules/molstar/lib/mol-model/custom-property.js"() {
+      init_mol_util();
+      (function(CustomPropertyDescriptor2) {
+        function getUUID(prop) {
+          if (!prop.__key) {
+            prop.__key = UUID.create22();
+          }
+          return prop.__key;
+        }
+        CustomPropertyDescriptor2.getUUID = getUUID;
+      })(CustomPropertyDescriptor || (CustomPropertyDescriptor = {}));
+      CustomProperties = class {
+        constructor() {
+          this._list = [];
+          this._set = /* @__PURE__ */ new Set();
+          this._refs = /* @__PURE__ */ new Map();
+          this._assets = /* @__PURE__ */ new Map();
+        }
+        get all() {
+          return this._list;
+        }
+        add(desc) {
+          if (this._set.has(desc))
+            return;
+          this._list.push(desc);
+          this._set.add(desc);
+        }
+        reference(desc, add) {
+          let refs = this._refs.get(desc) || 0;
+          refs += add ? 1 : -1;
+          this._refs.set(desc, Math.max(refs, 0));
+        }
+        hasReference(desc) {
+          return (this._refs.get(desc) || 0) > 0;
+        }
+        has(desc) {
+          return this._set.has(desc);
+        }
+        /** Sets assets for a prop, disposes of existing assets for that prop */
+        assets(desc, assets) {
+          const prevAssets = this._assets.get(desc);
+          if (prevAssets) {
+            for (const a5 of prevAssets)
+              a5.dispose();
+          }
+          if (assets)
+            this._assets.set(desc, assets);
+          else
+            this._assets.delete(desc);
+        }
+        /** Disposes of all assets of all props */
+        dispose() {
+          this._assets.forEach((assets) => {
+            for (const a5 of assets)
+              a5.dispose();
+          });
+        }
+      };
     }
   });
 
@@ -22533,7 +22767,7 @@ ${subTree.join("\n")}`;
       };
       __ElementIndex = { "H": 0, "h": 0, "D": 0, "d": 0, "T": 0, "t": 0, "He": 2, "HE": 2, "he": 2, "Li": 3, "LI": 3, "li": 3, "Be": 4, "BE": 4, "be": 4, "B": 5, "b": 5, "C": 6, "c": 6, "N": 7, "n": 7, "O": 8, "o": 8, "F": 9, "f": 9, "Ne": 10, "NE": 10, "ne": 10, "Na": 11, "NA": 11, "na": 11, "Mg": 12, "MG": 12, "mg": 12, "Al": 13, "AL": 13, "al": 13, "Si": 14, "SI": 14, "si": 14, "P": 15, "p": 15, "S": 16, "s": 16, "Cl": 17, "CL": 17, "cl": 17, "Ar": 18, "AR": 18, "ar": 18, "K": 19, "k": 19, "Ca": 20, "CA": 20, "ca": 20, "Sc": 21, "SC": 21, "sc": 21, "Ti": 22, "TI": 22, "ti": 22, "V": 23, "v": 23, "Cr": 24, "CR": 24, "cr": 24, "Mn": 25, "MN": 25, "mn": 25, "Fe": 26, "FE": 26, "fe": 26, "Co": 27, "CO": 27, "co": 27, "Ni": 28, "NI": 28, "ni": 28, "Cu": 29, "CU": 29, "cu": 29, "Zn": 30, "ZN": 30, "zn": 30, "Ga": 31, "GA": 31, "ga": 31, "Ge": 32, "GE": 32, "ge": 32, "As": 33, "AS": 33, "as": 33, "Se": 34, "SE": 34, "se": 34, "Br": 35, "BR": 35, "br": 35, "Kr": 36, "KR": 36, "kr": 36, "Rb": 37, "RB": 37, "rb": 37, "Sr": 38, "SR": 38, "sr": 38, "Y": 39, "y": 39, "Zr": 40, "ZR": 40, "zr": 40, "Nb": 41, "NB": 41, "nb": 41, "Mo": 42, "MO": 42, "mo": 42, "Tc": 43, "TC": 43, "tc": 43, "Ru": 44, "RU": 44, "ru": 44, "Rh": 45, "RH": 45, "rh": 45, "Pd": 46, "PD": 46, "pd": 46, "Ag": 47, "AG": 47, "ag": 47, "Cd": 48, "CD": 48, "cd": 48, "In": 49, "IN": 49, "in": 49, "Sn": 50, "SN": 50, "sn": 50, "Sb": 51, "SB": 51, "sb": 51, "Te": 52, "TE": 52, "te": 52, "I": 53, "i": 53, "Xe": 54, "XE": 54, "xe": 54, "Cs": 55, "CS": 55, "cs": 55, "Ba": 56, "BA": 56, "ba": 56, "La": 57, "LA": 57, "la": 57, "Ce": 58, "CE": 58, "ce": 58, "Pr": 59, "PR": 59, "pr": 59, "Nd": 60, "ND": 60, "nd": 60, "Pm": 61, "PM": 61, "pm": 61, "Sm": 62, "SM": 62, "sm": 62, "Eu": 63, "EU": 63, "eu": 63, "Gd": 64, "GD": 64, "gd": 64, "Tb": 65, "TB": 65, "tb": 65, "Dy": 66, "DY": 66, "dy": 66, "Ho": 67, "HO": 67, "ho": 67, "Er": 68, "ER": 68, "er": 68, "Tm": 69, "TM": 69, "tm": 69, "Yb": 70, "YB": 70, "yb": 70, "Lu": 71, "LU": 71, "lu": 71, "Hf": 72, "HF": 72, "hf": 72, "Ta": 73, "TA": 73, "ta": 73, "W": 74, "w": 74, "Re": 75, "RE": 75, "re": 75, "Os": 76, "OS": 76, "os": 76, "Ir": 77, "IR": 77, "ir": 77, "Pt": 78, "PT": 78, "pt": 78, "Au": 79, "AU": 79, "au": 79, "Hg": 80, "HG": 80, "hg": 80, "Tl": 81, "TL": 81, "tl": 81, "Pb": 82, "PB": 82, "pb": 82, "Bi": 83, "BI": 83, "bi": 83, "Po": 84, "PO": 84, "po": 84, "At": 85, "AT": 85, "at": 85, "Rn": 86, "RN": 86, "rn": 86, "Fr": 87, "FR": 87, "fr": 87, "Ra": 88, "RA": 88, "ra": 88, "Ac": 89, "AC": 89, "ac": 89, "Th": 90, "TH": 90, "th": 90, "Pa": 91, "PA": 91, "pa": 91, "U": 92, "u": 92, "Np": 93, "NP": 93, "np": 93, "Pu": 94, "PU": 94, "pu": 94, "Am": 95, "AM": 95, "am": 95, "Cm": 96, "CM": 96, "cm": 96, "Bk": 97, "BK": 97, "bk": 97, "Cf": 98, "CF": 98, "cf": 98, "Es": 99, "ES": 99, "es": 99, "Fm": 100, "FM": 100, "fm": 100, "Md": 101, "MD": 101, "md": 101, "No": 102, "NO": 102, "no": 102, "Lr": 103, "LR": 103, "lr": 103, "Rf": 104, "RF": 104, "rf": 104, "Db": 105, "DB": 105, "db": 105, "Sg": 106, "SG": 106, "sg": 106, "Bh": 107, "BH": 107, "bh": 107, "Hs": 108, "HS": 108, "hs": 108, "Mt": 109, "MT": 109, "mt": 109 };
       __ElementBondThresholds = { 0: 1.42, 1: 1.42, 3: 2.7, 4: 2.7, 6: 1.75, 7: 1.6, 8: 1.52, 11: 2.7, 12: 2.7, 13: 2.7, 14: 1.9, 15: 2, 16: 1.9, 17: 1.8, 19: 2.7, 20: 2.7, 21: 2.7, 22: 2.7, 23: 2.7, 24: 2.7, 25: 2.7, 26: 2.7, 27: 2.7, 28: 2.7, 29: 2.7, 30: 2.7, 31: 2.7, 33: 2.68, 37: 2.7, 38: 2.7, 39: 2.7, 40: 2.7, 41: 2.7, 42: 2.7, 43: 2.7, 44: 2.7, 45: 2.7, 46: 2.7, 47: 2.7, 48: 2.7, 49: 2.7, 50: 2.7, 55: 2.7, 56: 2.7, 57: 2.7, 58: 2.7, 59: 2.7, 60: 2.7, 61: 2.7, 62: 2.7, 63: 2.7, 64: 2.7, 65: 2.7, 66: 2.7, 67: 2.7, 68: 2.7, 69: 2.7, 70: 2.7, 71: 2.7, 72: 2.7, 73: 2.7, 74: 2.7, 75: 2.7, 76: 2.7, 77: 2.7, 78: 2.7, 79: 2.7, 80: 2.7, 81: 2.7, 82: 2.7, 83: 2.7, 87: 2.7, 88: 2.7, 89: 2.7, 90: 2.7, 91: 2.7, 92: 2.7, 93: 2.7, 94: 2.7, 95: 2.7, 96: 2.7, 97: 2.7, 98: 2.7, 99: 2.7, 100: 2.7, 101: 2.7, 102: 2.7, 103: 2.7, 104: 2.7, 105: 2.7, 106: 2.7, 107: 2.7, 108: 2.7, 109: 2.88 };
-      __ElementPairThresholds = { 0: 0.8, 20: 1.31, 27: 1.2, 35: 1.15, 44: 1.1, 54: 1, 60: 1.84, 72: 1.88, 84: 1.75, 85: 1.56, 86: 1.76, 98: 1.6, 99: 1.68, 100: 1.63, 112: 1.6, 113: 1.59, 114: 1.36, 129: 1.45, 135: 1.47, 144: 1.6, 152: 1.45, 170: 1.4, 180: 1.55, 202: 2.4, 222: 2.24, 224: 1.91, 225: 1.98, 243: 2.02, 269: 2, 293: 1.9, 316: 1.8, 420: 2.37, 480: 2.3, 512: 2.3, 544: 2.3, 612: 2.1, 629: 1.54, 665: 1, 813: 2.6, 854: 2.27, 894: 1.93, 896: 2.1, 937: 2.05, 938: 2.06, 981: 1.62, 1258: 2.68, 1309: 2.33, 1484: 1, 1763: 2.14, 1823: 2.48, 1882: 2.1, 1944: 1.72, 2380: 2.34, 3367: 2.44, 3733: 2.11, 3819: 2.6, 3821: 2.36, 4736: 2.75, 5724: 2.73, 5959: 2.63, 6519: 2.84, 6750: 2.87, 8991: 2.81 };
+      __ElementPairThresholds = { 0: 0.8, 20: 1.31, 27: 1.2, 35: 1.15, 44: 1.1, 54: 1, 60: 1.84, 72: 1.88, 84: 1.75, 85: 1.56, 86: 1.76, 98: 1.6, 99: 1.68, 100: 1.63, 112: 1.6, 113: 1.59, 114: 1.36, 129: 1.45, 135: 1.47, 144: 1.6, 152: 1.45, 170: 1.4, 180: 1.55, 202: 2.4, 222: 2.24, 224: 1.91, 225: 1.98, 243: 2.02, 269: 2, 293: 1.9, 316: 1.8, 420: 2.37, 480: 2.3, 512: 2.3, 544: 2.3, 612: 2.1, 629: 1.54, 665: 1, 813: 2.6, 851: 2.65, 854: 2.27, 894: 1.93, 896: 2.1, 937: 2.05, 938: 2.06, 981: 1.62, 1258: 2.68, 1309: 2.33, 1484: 1, 1763: 2.14, 1823: 2.48, 1882: 2.1, 1944: 1.72, 2063: 2.72, 2380: 2.34, 3132: 2.6, 3367: 2.44, 3733: 2.11, 3819: 2.6, 3821: 2.36, 4736: 2.75, 5724: 2.73, 5959: 2.63, 6519: 2.84, 6750: 2.87, 8991: 2.81 };
       __DefaultBondingRadius = 2.001;
       MetalsSet = (function() {
         const metals = ["LI", "NA", "K", "RB", "CS", "FR", "BE", "MG", "CA", "SR", "BA", "RA", "AL", "GA", "IN", "SN", "TL", "PB", "BI", "SC", "TI", "V", "CR", "MN", "FE", "CO", "NI", "CU", "ZN", "Y", "ZR", "NB", "MO", "TC", "RU", "RH", "PD", "AG", "CD", "LA", "HF", "TA", "W", "RE", "OS", "IR", "PT", "AU", "HG", "AC", "RF", "DB", "SG", "BH", "HS", "MT", "CE", "PR", "ND", "PM", "SM", "EU", "GD", "TB", "DY", "HO", "ER", "TM", "YB", "LU", "TH", "PA", "U", "NP", "PU", "AM", "CM", "BK", "CF", "ES", "FM", "MD", "NO", "LR"];
@@ -25330,7 +25564,7 @@ ${subTree.join("\n")}`;
         const isHb = isHydrogen(beI);
         if (isHa && isHb)
           continue;
-        const isMetal = (metalA || MetalsSet.has(beI)) && !(isHa || isHb);
+        const isMetal2 = (metalA || MetalsSet.has(beI)) && !(isHa || isHb);
         const rbI = residueIndex2[bI];
         if (raI === rbI && componentPairs) {
           const e = componentPairs.get(label_atom_id.value(bI));
@@ -25339,7 +25573,7 @@ ${subTree.join("\n")}`;
             atomB[atomB.length] = _bI;
             order[order.length] = e.order;
             let flag2 = e.flags;
-            if (isMetal) {
+            if (isMetal2) {
               if (flag2 | BondType.Flag.Covalent)
                 flag2 ^= BondType.Flag.Covalent;
               flag2 |= BondType.Flag.MetallicCoordination;
@@ -25367,7 +25601,7 @@ ${subTree.join("\n")}`;
           atomA[atomA.length] = _aI;
           atomB[atomB.length] = _bI;
           order[order.length] = getIntraBondOrderFromTable(compId2, atomIdA, label_atom_id.value(bI));
-          flags2[flags2.length] = (isMetal ? BondType.Flag.MetallicCoordination : BondType.Flag.Covalent) | BondType.Flag.Computed;
+          flags2[flags2.length] = (isMetal2 ? BondType.Flag.MetallicCoordination : BondType.Flag.Covalent) | BondType.Flag.Computed;
           key2[key2.length] = -1;
           const seqIdB = label_seq_id.value(rbI);
           if (seqIdA === seqIdB)
@@ -25589,7 +25823,7 @@ ${subTree.join("\n")}`;
         const isHb = isHydrogen(beI);
         if (isHa && isHb)
           continue;
-        const isMetal = (metalA || MetalsSet.has(beI)) && !(isHa || isHb);
+        const isMetal2 = (metalA || MetalsSet.has(beI)) && !(isHa || isHb);
         const dist = Math.sqrt(squaredDistances[ni]);
         if (dist === 0)
           continue;
@@ -25599,7 +25833,7 @@ ${subTree.join("\n")}`;
           const compIdB = label_comp_idB.value(residueIndexB[bI]);
           builder.add(_aI, _bI, {
             order: getInterBondOrderFromTable(compIdA, compIdB, atomIdA, atomIdB),
-            flag: (isMetal ? BondType.Flag.MetallicCoordination : BondType.Flag.Covalent) | BondType.Flag.Computed,
+            flag: (isMetal2 ? BondType.Flag.MetallicCoordination : BondType.Flag.Covalent) | BondType.Flag.Computed,
             key: -1
           });
         }
@@ -26074,8 +26308,8 @@ ${subTree.join("\n")}`;
     const bondOffset = state.bonds.offset;
     const a5 = state.startVertex + i;
     const bStart = bondOffset[a5], bEnd = bondOffset[a5 + 1];
-    const bondCount = bEnd - bStart;
-    if (bondCount <= 1 || state.isRingAtom[i] && bondCount === 2)
+    const bondCount2 = bEnd - bStart;
+    if (bondCount2 <= 1 || state.isRingAtom[i] && bondCount2 === 2)
       return false;
     return true;
   }
@@ -26358,7 +26592,31 @@ ${subTree.join("\n")}`;
   });
 
   // node_modules/molstar/lib/mol-model/structure/model/properties/atomic/types.js
-  var Elements;
+  function isAlkaliMetal(element) {
+    return AlkaliMetals.has(element);
+  }
+  function isAlkalineEarthMetal(element) {
+    return AlkalineEarthMetals.has(element);
+  }
+  function isPostTransitionMetal(element) {
+    return PostTransitionMetals.has(element);
+  }
+  function isTransitionMetal(element) {
+    const no = AtomNumber(element);
+    return no >= 21 && no <= 29 || no >= 39 && no <= 47 || no >= 72 && no <= 79 || no >= 104 && no <= 108;
+  }
+  function isLanthanide(element) {
+    const no = AtomNumber(element);
+    return no >= 57 && no <= 71;
+  }
+  function isActinide(element) {
+    const no = AtomNumber(element);
+    return no >= 89 && no <= 103;
+  }
+  function isMetal(element) {
+    return isAlkaliMetal(element) || isAlkalineEarthMetal(element) || isLanthanide(element) || isActinide(element) || isTransitionMetal(element) || isPostTransitionMetal(element);
+  }
+  var Elements, AlkaliMetals, AlkalineEarthMetals, PostTransitionMetals;
   var init_types2 = __esm({
     "node_modules/molstar/lib/mol-model/structure/model/properties/atomic/types.js"() {
       init_measures();
@@ -26484,6 +26742,9 @@ ${subTree.join("\n")}`;
         Elements2["TS"] = "TS";
         Elements2["OG"] = "OG";
       })(Elements || (Elements = {}));
+      AlkaliMetals = /* @__PURE__ */ new Set(["LI", "NA", "K", "RB", "CS", "FR"]);
+      AlkalineEarthMetals = /* @__PURE__ */ new Set(["BE", "MG", "CA", "SR", "BA", "RA"]);
+      PostTransitionMetals = /* @__PURE__ */ new Set(["ZN", "GA", "CD", "IN", "SN", "HG", "TI", "PB", "BI", "PO", "CN"]);
     }
   });
 
@@ -27804,9 +28065,10 @@ ${subTree.join("\n")}`;
           get boundary() {
             if (this.props.boundary)
               return this.props.boundary;
+            const fast = Traits.is(this.traits, Trait.FastBoundary);
             const { x, y, z } = this.model.atomicConformation;
-            const radius = Model.getAtomicRadii(this.model);
-            this.props.boundary = Traits.is(this.traits, Trait.FastBoundary) ? getFastBoundary({ x, y, z, radius, indices: this.elements }) : getBoundary({ x, y, z, radius, indices: this.elements });
+            const radius = fast ? void 0 : Model.getAtomicRadii(this.model);
+            this.props.boundary = fast ? getFastBoundary({ x, y, z, radius, indices: this.elements }) : getBoundary({ x, y, z, radius, indices: this.elements });
             return this.props.boundary;
           }
           get lookup3d() {
@@ -32234,6 +32496,8 @@ ${subTree.join("\n")}`;
       residue = {
         key: p2((l) => !Unit.isAtomic(l.unit) ? notAtomic() : l.unit.residueIndex[l.element]),
         group_PDB: p2((l) => !Unit.isAtomic(l.unit) ? notAtomic() : l.unit.model.atomicHierarchy.residues.group_PDB.value(l.unit.residueIndex[l.element])),
+        label_comp_id: p2(compId),
+        auth_comp_id: p2((l) => !Unit.isAtomic(l.unit) ? notAtomic() : l.unit.model.atomicHierarchy.atoms.auth_comp_id.value(l.element)),
         label_seq_id: p2(seqId),
         auth_seq_id: p2((l) => !Unit.isAtomic(l.unit) ? notAtomic() : l.unit.model.atomicHierarchy.residues.auth_seq_id.value(l.unit.residueIndex[l.element])),
         pdbx_PDB_ins_code: p2((l) => !Unit.isAtomic(l.unit) ? notAtomic() : l.unit.model.atomicHierarchy.residues.pdbx_PDB_ins_code.value(l.unit.residueIndex[l.element])),
@@ -33816,6 +34080,7 @@ ${subTree.join("\n")}`;
     "node_modules/molstar/lib/mol-model/structure/structure/symmetry.js"() {
       init_int();
       init_util2();
+      init_hash_functions();
       init_geometry();
       init_linear_algebra();
       init_mol_task();
@@ -33920,6 +34185,29 @@ ${subTree.join("\n")}`;
           return ret;
         }
         StructureSymmetry2.computeTransformGroups = computeTransformGroups;
+        function computeChildAwareTransformGroups(s) {
+          if (!s.child)
+            return computeTransformGroups(s);
+          const childGroups = s.child.unitSymmetryGroups;
+          const childGroupIndex = /* @__PURE__ */ new Map();
+          for (let i = 0; i < childGroups.length; i++) {
+            for (const u of childGroups[i].units) {
+              childGroupIndex.set(u.id, i);
+            }
+          }
+          const groups = EquivalenceClasses((u) => {
+            var _a;
+            return hash2(Unit.hashUnit(u), (_a = childGroupIndex.get(u.id)) !== null && _a !== void 0 ? _a : -1);
+          }, (a5, b5) => areUnitsEquivalent(a5, b5) && childGroupIndex.get(a5.id) === childGroupIndex.get(b5.id));
+          for (const u of s.units)
+            groups.add(u.id, u);
+          const ret = [];
+          for (const eqUnits of groups.groups) {
+            ret.push(Unit.SymmetryGroup(eqUnits.map((id) => s.unitMap.get(id))));
+          }
+          return ret;
+        }
+        StructureSymmetry2.computeChildAwareTransformGroups = computeChildAwareTransformGroups;
         function areTransformGroupsEquivalent(a5, b5) {
           if (a5.length !== b5.length)
             return false;
@@ -33933,6 +34221,8 @@ ${subTree.join("\n")}`;
               if (au[j].conformation !== bu[j].conformation)
                 return false;
             }
+            if (!SortedArray.areEqual(a5[i].elements, b5[i].elements))
+              return false;
           }
           return true;
         }
@@ -34465,6 +34755,134 @@ ${subTree.join("\n")}`;
     }
   });
 
+  // node_modules/molstar/lib/mol-model/structure/structure/coordination/data.js
+  var EmptyCoordination;
+  var init_data3 = __esm({
+    "node_modules/molstar/lib/mol-model/structure/structure/coordination/data.js"() {
+      EmptyCoordination = {
+        sites: {
+          unitIds: [],
+          indices: [],
+          numbers: [],
+          count: 0
+        },
+        getSiteIndex: () => -1,
+        eachLigand: () => {
+        }
+      };
+    }
+  });
+
+  // node_modules/molstar/lib/mol-model/structure/structure/coordination/compute.js
+  function interBondCount(structure, unit2, index) {
+    let count3 = 0;
+    const indices2 = structure.interUnitBonds.getEdgeIndices(index, unit2.id);
+    for (let i = 0, il = indices2.length; i < il; ++i) {
+      const b5 = structure.interUnitBonds.edges[indices2[i]];
+      if (BondType.isCovalent(b5.props.flag) || BondType.is(b5.props.flag, BondType.Flag.MetallicCoordination))
+        count3 += 1;
+    }
+    return count3;
+  }
+  function intraBondCount(unit2, index) {
+    let count3 = 0;
+    const { offset: offset2, edgeProps: { flags: flags2 } } = unit2.bonds;
+    for (let i = offset2[index], il = offset2[index + 1]; i < il; ++i) {
+      if (BondType.isCovalent(flags2[i]) || BondType.is(flags2[i], BondType.Flag.MetallicCoordination))
+        count3 += 1;
+    }
+    return count3;
+  }
+  function bondCount(structure, unit2, index) {
+    return interBondCount(structure, unit2, index) + intraBondCount(unit2, index);
+  }
+  function eachInterBondedAtom(structure, unit2, index, cb2) {
+    const indices2 = structure.interUnitBonds.getEdgeIndices(index, unit2.id);
+    for (let i = 0, il = indices2.length; i < il; ++i) {
+      const b5 = structure.interUnitBonds.edges[indices2[i]];
+      const uB = structure.unitMap.get(b5.unitB);
+      if ((BondType.isCovalent(b5.props.flag) || BondType.is(b5.props.flag, BondType.Flag.MetallicCoordination)) && uB.model.atomicHierarchy.derived.atom.atomicNumber[uB.elements[b5.indexB]] !== _H)
+        cb2(uB, b5.indexB);
+    }
+  }
+  function eachIntraBondedAtom(unit2, index, cb2) {
+    const { elements } = unit2;
+    const { atomicNumber } = unit2.model.atomicHierarchy.derived.atom;
+    const { offset: offset2, b: b5, edgeProps: { flags: flags2 } } = unit2.bonds;
+    for (let i = offset2[index], il = offset2[index + 1]; i < il; ++i) {
+      if ((BondType.isCovalent(flags2[i]) || BondType.is(flags2[i], BondType.Flag.MetallicCoordination)) && atomicNumber[elements[b5[i]]] !== _H)
+        cb2(unit2, b5[i]);
+    }
+  }
+  function eachBondedAtom(structure, unit2, index, cb2) {
+    eachInterBondedAtom(structure, unit2, index, cb2);
+    eachIntraBondedAtom(unit2, index, cb2);
+  }
+  function computeCoordination(structure) {
+    const unitIds = [];
+    const indices2 = [];
+    const numbers = [];
+    const siteIndex = /* @__PURE__ */ new Map();
+    for (let ui = 0, uil = structure.units.length; ui < uil; ++ui) {
+      const unit2 = structure.units[ui];
+      if (!Unit.isAtomic(unit2))
+        continue;
+      const { elements } = unit2;
+      for (let ei = 0, eil = elements.length; ei < eil; ++ei) {
+        const element = elements[ei];
+        const unitIndex = ei;
+        const _bondCount = bondCount(structure, unit2, unitIndex);
+        if (_bondCount >= MinCoordination) {
+          siteIndex.set(coordinationKey(unit2.id, element), siteIndex.size);
+          unitIds.push(unit2.id);
+          indices2.push(unitIndex);
+          numbers.push(_bondCount);
+        }
+      }
+    }
+    if (siteIndex.size === 0)
+      return EmptyCoordination;
+    const l = element_exports.Location.create(structure);
+    return {
+      sites: {
+        unitIds,
+        indices: indices2,
+        numbers,
+        count: siteIndex.size
+      },
+      getSiteIndex: (unit2, element) => {
+        var _a;
+        return (_a = siteIndex.get(coordinationKey(unit2.id, element))) !== null && _a !== void 0 ? _a : -1;
+      },
+      eachLigand: (siteIndex2, cb2) => {
+        const unitId = unitIds[siteIndex2];
+        const element = indices2[siteIndex2];
+        const unit2 = structure.unitMap.get(unitId);
+        eachBondedAtom(structure, unit2, element, (u, i) => {
+          l.unit = u;
+          l.element = u.elements[i];
+          cb2(l);
+        });
+      }
+    };
+  }
+  function coordinationKey(unitId, element) {
+    return cantorPairing(unitId, element);
+  }
+  var MinCoordination, _H;
+  var init_compute3 = __esm({
+    "node_modules/molstar/lib/mol-model/structure/structure/coordination/compute.js"() {
+      init_unit();
+      init_element2();
+      init_data3();
+      init_util2();
+      init_types();
+      init_measures();
+      MinCoordination = 4;
+      _H = AtomicNumbers["H"];
+    }
+  });
+
   // node_modules/molstar/lib/mol-model/structure/structure/util/boundary.js
   function getBoundaryHelper2(count3) {
     return count3 > 500 ? boundaryHelperCoarse2 : boundaryHelperFine2;
@@ -34533,18 +34951,18 @@ ${subTree.join("\n")}`;
     };
   }
   function getIntraUnitBondMapping(structure) {
-    let bondCount = 0;
+    let bondCount2 = 0;
     const unitGroupOffset = [];
     for (const ug of structure.unitSymmetryGroups) {
-      unitGroupOffset.push(bondCount);
+      unitGroupOffset.push(bondCount2);
       const unit2 = ug.units[0];
       if (Unit.isAtomic(unit2)) {
-        bondCount += unit2.bonds.edgeCount * 2 * ug.units.length;
+        bondCount2 += unit2.bonds.edgeCount * 2 * ug.units.length;
       }
     }
-    const unitIndex = new Uint32Array(bondCount);
-    const unitEdgeIndex = new Uint32Array(bondCount);
-    const unitGroupIndex = new Uint32Array(bondCount);
+    const unitIndex = new Uint32Array(bondCount2);
+    const unitEdgeIndex = new Uint32Array(bondCount2);
+    const unitGroupIndex = new Uint32Array(bondCount2);
     let idx = 0;
     let unitIdx = 0;
     for (const ug of structure.unitSymmetryGroups) {
@@ -34562,7 +34980,7 @@ ${subTree.join("\n")}`;
       }
       unitIdx += 1;
     }
-    return { bondCount, unitIndex, unitEdgeIndex, unitGroupIndex, unitGroupOffset };
+    return { bondCount: bondCount2, unitIndex, unitEdgeIndex, unitGroupIndex, unitGroupOffset };
   }
   var init_mapping = __esm({
     "node_modules/molstar/lib/mol-model/structure/structure/mapping.js"() {
@@ -34737,6 +35155,7 @@ ${subTree.join("\n")}`;
       init_symmetry3();
       init_properties();
       init_compute2();
+      init_compute3();
       init_linear_algebra();
       init_id_factory();
       init_custom_property();
@@ -34930,6 +35349,12 @@ ${subTree.join("\n")}`;
             return this.state.carbohydrates;
           this.state.carbohydrates = computeCarbohydrates(this);
           return this.state.carbohydrates;
+        }
+        get coordination() {
+          if (this.state.coordination)
+            return this.state.coordination;
+          this.state.coordination = computeCoordination(this);
+          return this.state.coordination;
         }
         get models() {
           if (this.state.models)
@@ -39186,6 +39611,17 @@ ${subTree.join("\n")}`;
          */
         chemical_formula: {
           /**
+           * Formula expressed in conformance with IUPAC rules for inorganic
+           * and metal-organic compounds where these conflict with the rules
+           * for any other chemical_formula entries. Typically used for
+           * formatting a formula in accordance with journal rules. This
+           * should appear in the data block in addition to the most
+           * appropriate of the other chemical_formula data names.
+           * Ref: IUPAC (1990). Nomenclature of Inorganic Chemistry.
+           * Oxford: Blackwell Scientific Publications.
+           */
+          iupac: str8,
+          /**
            * Formula with each discrete bonded residue or ion shown as a
            * separate moiety. See above CHEMICAL_FORMULA for rules
            * for writing chemical formulae. In addition to the general
@@ -39255,6 +39691,32 @@ ${subTree.join("\n")}`;
            */
           it_number: int5,
           /**
+           * _space_group.name_H-M_alt allows for any Hermann-Mauguin symbol
+           * to be given. The way in which this item is used is determined
+           * by the user and in general is not intended to be interpreted by
+           * computer. It may, for example, be used to give one of the
+           * extended Hermann-Mauguin symbols given in Table 4.3.1 of
+           * International Tables for Crystallography Vol. A (1995) or
+           * a Hermann-Mauguin symbol for a conventional or unconventional
+           * setting.
+           * Each component of the space group name is separated by a
+           * space or underscore. The use of space is strongly
+           * recommended. The underscore is only retained because it
+           * was used in earlier archived files. It should not be
+           * used in new CIFs. Subscripts should appear without special
+           * symbols. Bars should be given as negative signs before the
+           * numbers to which they apply.
+           * The commonly used Hermann-Mauguin symbol determines the space
+           * group type uniquely, but a given space group type may be
+           * described by more than one Hermann-Mauguin symbol. The space
+           * group type is best described using _space_group.IT_number.
+           * The Hermann-Mauguin symbol may contain information on the
+           * choice of basis though not on the choice of origin. To
+           * define the setting uniquely use _space_group.name_Hall or
+           * list the symmetry operations.
+           */
+          "name_h-m_alt": str8,
+          /**
            * The full international Hermann-Mauguin space-group symbol as
            * defined in Section 2.1.3.3 and given as the second item of the
            * second line of each of the space-group tables of Chapter 2.3 of
@@ -39284,7 +39746,19 @@ ${subTree.join("\n")}`;
            * Space-group symmetry, edited by M. I. Aroyo, 6th ed.
            * Chichester: John Wiley & Sons.
            */
-          "name_h-m_full": str8
+          "name_h-m_full": str8,
+          /**
+           * Space group symbol defined by Hall. Each component of the
+           * space group name is separated by a space or an underscore.
+           * The use of space is strongly recommended because it specifies
+           * the coordinate system. The underscore in the name is only
+           * retained because it was used in earlier archived files. It
+           * should not be used in new CIFs.
+           * Ref: Hall, S. R. (1981). Acta Cryst. A37, 517-525
+           * [See also International Tables for Crystallography,
+           * Vol. B (1993) 1.4 Appendix B]
+           */
+          name_hall: str8
         },
         /**
          * The category of data items used to describe symmetry equivalent sites
@@ -39784,12 +40258,22 @@ ${subTree.join("\n")}`;
         "cell.formula_units_z": [
           "cell_formula_units_Z"
         ],
+        "chemical_formula.iupac": [
+          "chemical_formula_IUPAC"
+        ],
         "space_group.it_number": [
           "space_group_IT_number",
           "symmetry_Int_Tables_number"
         ],
+        "space_group.name_h-m_alt": [
+          "space_group_name_H-M_alt"
+        ],
         "space_group.name_h-m_full": [
           "symmetry_space_group_name_H-M"
+        ],
+        "space_group.name_hall": [
+          "space_group_name_Hall",
+          "symmetry_space_group_name_Hall"
         ],
         "space_group_symop.operation_xyz": [
           "symmetry_equiv_pos_as_xyz"
@@ -40197,15 +40681,34 @@ ${subTree.join("\n")}`;
           this.types = [];
           this.descriptions = [];
           this.compoundsMap = /* @__PURE__ */ new Map();
+          this.seqresMap = /* @__PURE__ */ new Map();
           this.namesMap = /* @__PURE__ */ new Map();
           this.heteroMap = /* @__PURE__ */ new Map();
           this.chainMap = /* @__PURE__ */ new Map();
+          this.sequenceMap = /* @__PURE__ */ new Map();
+          this.polymerCount = 0;
         }
         set(type3, description) {
           this.count += 1;
           this.ids.push(`${this.count}`);
           this.types.push(type3);
           this.descriptions.push([description]);
+        }
+        addPolymer(map3, key2, options) {
+          if (!map3.has(key2)) {
+            this.polymerCount += 1;
+            this.set("polymer", (options === null || options === void 0 ? void 0 : options.customName) || `Polymer ${this.polymerCount}`);
+            map3.set(key2, `${this.count}`);
+          }
+          return map3.get(key2);
+        }
+        addNonPolymer(map3, key2, moleculeType, options) {
+          if (!map3.has(key2)) {
+            const type3 = moleculeType === MoleculeType.Saccharide ? "branched" : "non-polymer";
+            this.set(type3, (options === null || options === void 0 ? void 0 : options.customName) || this.namesMap.get(key2) || key2);
+            map3.set(key2, `${this.count}`);
+          }
+          return map3.get(key2);
         }
         getEntityId(compId2, moleculeType, chainId, options) {
           if (moleculeType === MoleculeType.Water) {
@@ -40218,18 +40721,22 @@ ${subTree.join("\n")}`;
             if (this.compoundsMap.has(chainId)) {
               return this.compoundsMap.get(chainId);
             } else {
-              if (!this.chainMap.has(chainId)) {
-                this.set("polymer", (options === null || options === void 0 ? void 0 : options.customName) || `Polymer ${this.chainMap.size + 1}`);
-                this.chainMap.set(chainId, `${this.count}`);
+              if (this.seqresMap.has(chainId)) {
+                const { key: key2, residues: residues2 } = this.seqresMap.get(chainId);
+                if (residues2.has(compId2)) {
+                  return this.addPolymer(this.sequenceMap, key2, options);
+                }
               }
-              return this.chainMap.get(chainId);
+              return this.addPolymer(this.chainMap, chainId, options);
             }
           } else {
-            if (!this.heteroMap.has(compId2)) {
-              this.set("non-polymer", (options === null || options === void 0 ? void 0 : options.customName) || this.namesMap.get(compId2) || compId2);
-              this.heteroMap.set(compId2, `${this.count}`);
+            if (this.seqresMap.has(chainId)) {
+              const { key: key2, residues: residues2 } = this.seqresMap.get(chainId);
+              if (residues2.has(compId2)) {
+                return this.addNonPolymer(this.sequenceMap, key2, moleculeType, options);
+              }
             }
-            return this.heteroMap.get(compId2);
+            return this.addNonPolymer(this.heteroMap, compId2, moleculeType, options);
           }
         }
         getEntityTable() {
@@ -40250,6 +40757,33 @@ ${subTree.join("\n")}`;
         }
         setNames(names) {
           names.forEach((n) => this.namesMap.set(n[0], n[1]));
+        }
+        setSeqres(seqresMap) {
+          for (const [chainId, residues2] of seqresMap) {
+            this.seqresMap.set(chainId, {
+              key: residues2.join("-"),
+              residues: new Set(residues2)
+            });
+          }
+        }
+        /** Get entity_id for a chain based on SEQRES data. Only valid after all atoms have been processed via getEntityId. */
+        getEntityIdForChain(chainId) {
+          if (this.compoundsMap.size === 0 && this.chainMap.size === 0 && this.sequenceMap.size === 0) {
+            throw new Error("EntityBuilder.getEntityIdForChain called before any atoms were processed. Call getEntityId for all atoms first.");
+          }
+          if (this.compoundsMap.has(chainId)) {
+            return this.compoundsMap.get(chainId);
+          }
+          if (this.seqresMap.has(chainId)) {
+            const { key: key2 } = this.seqresMap.get(chainId);
+            if (this.sequenceMap.has(key2)) {
+              return this.sequenceMap.get(key2);
+            }
+          }
+          if (this.chainMap.has(chainId)) {
+            return this.chainMap.get(chainId);
+          }
+          return void 0;
         }
       };
     }
@@ -42935,7 +43469,6 @@ ${subTree.join("\n")}`;
     "node_modules/molstar/lib/mol-model/structure/model/model.js"() {
       init_uuid();
       init_atomic();
-      init_custom_property();
       init_util();
       init_linear_algebra();
       init_coordinates2();
@@ -42969,9 +43502,6 @@ ${subTree.join("\n")}`;
               modelNum: i,
               atomicConformation: getAtomicConformationFromFrame(model, f),
               // TODO: add support for supplying sphere and gaussian coordinates in addition to atomic coordinates?
-              // coarseConformation: coarse.conformation,
-              customProperties: new CustomProperties(),
-              _staticPropertyData: /* @__PURE__ */ Object.create(null),
               _dynamicPropertyData: /* @__PURE__ */ Object.create(null)
             };
             if (f.cell) {
@@ -42988,10 +43518,10 @@ ${subTree.join("\n")}`;
           const srcIndex = model.atomicHierarchy.atomSourceIndex;
           let srcIndexArray = void 0;
           if ("__srcIndexArray__" in model._staticPropertyData) {
-            srcIndexArray = model._dynamicPropertyData.__srcIndexArray__;
+            srcIndexArray = model._staticPropertyData.__srcIndexArray__;
           } else {
             srcIndexArray = Column.isIdentity(srcIndex) ? void 0 : srcIndex.toArray({ array: Int32Array });
-            model._dynamicPropertyData.__srcIndexArray__ = srcIndexArray;
+            model._staticPropertyData.__srcIndexArray__ = srcIndexArray;
           }
           return srcIndexArray;
         }
@@ -43038,15 +43568,15 @@ ${subTree.join("\n")}`;
         Model2.getCenter = getCenter;
         const AtomicRadiiProp = "__AtomicRadii__";
         function getAtomicRadii(model) {
-          if (model._dynamicPropertyData[AtomicRadiiProp])
-            return model._dynamicPropertyData[AtomicRadiiProp];
+          if (model._staticPropertyData[AtomicRadiiProp])
+            return model._staticPropertyData[AtomicRadiiProp];
           const nAtoms = model.atomicHierarchy.atoms._rowCount;
           const type_symbol = model.atomicHierarchy.atoms.type_symbol.value;
           const radii = new Float32Array(nAtoms);
           for (let i = 0; i < nAtoms; i++) {
             radii[i] = VdwRadius(type_symbol(i));
           }
-          model._dynamicPropertyData[AtomicRadiiProp] = radii;
+          model._staticPropertyData[AtomicRadiiProp] = radii;
           return radii;
         }
         Model2.getAtomicRadii = getAtomicRadii;
@@ -43131,7 +43661,7 @@ ${subTree.join("\n")}`;
                   polymerDirectionCount += 1;
               }
             }
-            let hasBB = false, hasSC1 = false;
+            let hasBB = false, hasSC1 = false, hasTrace = false;
             const { label_atom_id, _rowCount: atomCount2 } = model.atomicHierarchy.atoms;
             for (let i = 0; i < atomCount2; ++i) {
               const atomName = label_atom_id.value(i);
@@ -43139,7 +43669,9 @@ ${subTree.join("\n")}`;
                 hasBB = true;
               if (!hasSC1 && atomName === "SC1")
                 hasSC1 = true;
-              if (hasBB && hasSC1)
+              if (!hasTrace && TraceAtoms.has(atomName))
+                hasTrace = true;
+              if (hasBB && hasSC1 && hasTrace)
                 break;
             }
             coarseGrained = false;
@@ -43148,7 +43680,7 @@ ${subTree.join("\n")}`;
                 coarseGrained = true;
               } else if (atomCount2 / polymerResidueCount < 3) {
                 coarseGrained = true;
-              } else if (polymerDirectionCount === 0) {
+              } else if (polymerDirectionCount === 0 && hasTrace) {
                 coarseGrained = true;
               }
             }
@@ -43951,6 +44483,6551 @@ ${subTree.join("\n")}`;
           });
         }
       };
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/script/mol-script/script-macro.js
+  function getPositionalArgs(args) {
+    return Object.keys(args).filter((k) => !isNaN(k)).map((k) => +k).sort((a5, b5) => a5 - b5).map((k) => args[k]);
+  }
+  function tryGetArg(args, name, defaultValue) {
+    return args && args[name] !== void 0 ? args[name] : defaultValue;
+  }
+  var init_script_macro = __esm({
+    "node_modules/molstar/lib/mol-script/script/mol-script/script-macro.js"() {
+      init_builder();
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/script/mol-script/symbols.js
+  function Alias(symbol2, ...aliases) {
+    return { kind: "alias", aliases, symbol: symbol2 };
+  }
+  function Macro(symbol2, translate, ...aliases) {
+    symbol2.info.namespace = "molscript-macro";
+    symbol2.id = `molscript-macro.${symbol2.info.name}`;
+    return { kind: "macro", symbol: symbol2, translate, aliases: [symbol2.info.name, ...aliases] };
+  }
+  function isMolScriptSymbol(x) {
+    return x.kind === "alias" || x.kind === "macro";
+  }
+  function makeList(xs) {
+    for (const x of xs) {
+      if (isMolScriptSymbol(x))
+        list2.push(x);
+      else if (x instanceof Array)
+        makeList(x);
+    }
+  }
+  function substSymbols(expr) {
+    if (Expression.isLiteral(expr)) {
+      return expr;
+    }
+    if (Expression.isSymbol(expr)) {
+      if (!SymbolMap3[expr.name])
+        return expr;
+      const s = SymbolMap3[expr.name];
+      if (s.kind === "alias")
+        return Expression.Symbol(SymbolMap3[expr.name].symbol.id);
+      throw s.translate([]);
+    }
+    const isMacro = Expression.isSymbol(expr.head) && !!SymbolMap3[expr.head.name] && SymbolMap3[expr.head.name].kind === "macro";
+    const head = isMacro ? expr.head : substSymbols(expr.head);
+    const headChanged = head !== expr.head;
+    if (!expr.args) {
+      if (isMacro)
+        return substSymbols(expr.head);
+      return headChanged ? Expression.Apply(head) : expr;
+    }
+    let argsChanged = false;
+    let newArgs;
+    if (Expression.isArgumentsArray(expr.args)) {
+      newArgs = [];
+      for (let i = 0, _i = expr.args.length; i < _i; i++) {
+        const oldArg = expr.args[i];
+        const newArg = substSymbols(oldArg);
+        if (oldArg !== newArg)
+          argsChanged = true;
+        newArgs[newArgs.length] = newArg;
+      }
+      if (!argsChanged)
+        newArgs = expr.args;
+      if (!isMacro && !headChanged && !argsChanged)
+        return expr;
+    } else {
+      newArgs = {};
+      for (const key2 of Object.keys(expr.args)) {
+        const oldArg = expr.args[key2];
+        const newArg = substSymbols(oldArg);
+        if (oldArg !== newArg)
+          argsChanged = true;
+        newArgs[key2] = newArg;
+      }
+      if (!isMacro && !headChanged && !argsChanged)
+        return expr;
+      if (!argsChanged)
+        newArgs = expr.args;
+    }
+    if (isMacro) {
+      const macro = SymbolMap3[expr.head.name];
+      if (macro.kind !== "macro")
+        return Expression.Apply(head, newArgs);
+      const ret = macro.translate(newArgs);
+      return ret;
+    }
+    return Expression.Apply(head, newArgs);
+  }
+  function transpileMolScript(expr) {
+    return substSymbols(expr);
+  }
+  var SymbolTable, list2, normalized, Constants2, NamedArgs, SymbolMap3, SymbolList3;
+  var init_symbols = __esm({
+    "node_modules/molstar/lib/mol-script/script/mol-script/symbols.js"() {
+      init_unique_array();
+      init_expression();
+      init_symbol();
+      init_symbol_table();
+      init_type();
+      init_structure_query();
+      init_builder();
+      init_script_macro();
+      SymbolTable = [
+        [
+          "Core symbols",
+          Alias(MolScriptSymbolTable.core.type.bool, "bool"),
+          Alias(MolScriptSymbolTable.core.type.num, "num"),
+          Alias(MolScriptSymbolTable.core.type.str, "str"),
+          Alias(MolScriptSymbolTable.core.type.regex, "regex"),
+          Alias(MolScriptSymbolTable.core.type.list, "list"),
+          Alias(MolScriptSymbolTable.core.type.set, "set"),
+          Alias(MolScriptSymbolTable.core.type.compositeKey, "composite-key"),
+          Alias(MolScriptSymbolTable.core.logic.not, "not"),
+          Alias(MolScriptSymbolTable.core.logic.and, "and"),
+          Alias(MolScriptSymbolTable.core.logic.or, "or"),
+          Alias(MolScriptSymbolTable.core.ctrl.if, "if"),
+          Alias(MolScriptSymbolTable.core.ctrl.fn, "fn"),
+          Alias(MolScriptSymbolTable.core.ctrl.eval, "eval"),
+          Alias(MolScriptSymbolTable.core.math.add, "add", "+"),
+          Alias(MolScriptSymbolTable.core.math.sub, "sub", "-"),
+          Alias(MolScriptSymbolTable.core.math.mult, "mult", "*"),
+          Alias(MolScriptSymbolTable.core.math.div, "div", "/"),
+          Alias(MolScriptSymbolTable.core.math.pow, "pow", "**"),
+          Alias(MolScriptSymbolTable.core.math.mod, "mod"),
+          Alias(MolScriptSymbolTable.core.math.min, "min"),
+          Alias(MolScriptSymbolTable.core.math.max, "max"),
+          Alias(MolScriptSymbolTable.core.math.cantorPairing, "cantor-pairing"),
+          Alias(MolScriptSymbolTable.core.math.sortedCantorPairing, "sorted-cantor-pairing"),
+          Alias(MolScriptSymbolTable.core.math.invertCantorPairing, "invert-cantor-pairing"),
+          Alias(MolScriptSymbolTable.core.math.floor, "floor"),
+          Alias(MolScriptSymbolTable.core.math.ceil, "ceil"),
+          Alias(MolScriptSymbolTable.core.math.roundInt, "round"),
+          Alias(MolScriptSymbolTable.core.math.trunc, "trunc"),
+          Alias(MolScriptSymbolTable.core.math.abs, "abs"),
+          Alias(MolScriptSymbolTable.core.math.sign, "sign"),
+          Alias(MolScriptSymbolTable.core.math.sqrt, "sqrt"),
+          Alias(MolScriptSymbolTable.core.math.cbrt, "cbrt"),
+          Alias(MolScriptSymbolTable.core.math.sin, "sin"),
+          Alias(MolScriptSymbolTable.core.math.cos, "cos"),
+          Alias(MolScriptSymbolTable.core.math.tan, "tan"),
+          Alias(MolScriptSymbolTable.core.math.asin, "asin"),
+          Alias(MolScriptSymbolTable.core.math.acos, "acos"),
+          Alias(MolScriptSymbolTable.core.math.atan, "atan"),
+          Alias(MolScriptSymbolTable.core.math.sinh, "sinh"),
+          Alias(MolScriptSymbolTable.core.math.cosh, "cosh"),
+          Alias(MolScriptSymbolTable.core.math.tanh, "tanh"),
+          Alias(MolScriptSymbolTable.core.math.exp, "exp"),
+          Alias(MolScriptSymbolTable.core.math.log, "log"),
+          Alias(MolScriptSymbolTable.core.math.log10, "log10"),
+          Alias(MolScriptSymbolTable.core.math.atan2, "atan2"),
+          Alias(MolScriptSymbolTable.core.rel.eq, "eq", "="),
+          Alias(MolScriptSymbolTable.core.rel.neq, "neq", "!="),
+          Alias(MolScriptSymbolTable.core.rel.lt, "lt", "<"),
+          Alias(MolScriptSymbolTable.core.rel.lte, "lte", "<="),
+          Alias(MolScriptSymbolTable.core.rel.gr, "gr", ">"),
+          Alias(MolScriptSymbolTable.core.rel.gre, "gre", ">="),
+          Alias(MolScriptSymbolTable.core.rel.inRange, "in-range"),
+          Alias(MolScriptSymbolTable.core.str.concat, "concat"),
+          Alias(MolScriptSymbolTable.core.str.match, "regex.match"),
+          Alias(MolScriptSymbolTable.core.list.getAt, "list.get"),
+          Alias(MolScriptSymbolTable.core.set.has, "set.has"),
+          Alias(MolScriptSymbolTable.core.set.isSubset, "set.subset")
+        ],
+        [
+          "Structure",
+          [
+            "Types",
+            Alias(MolScriptSymbolTable.structureQuery.type.entityType, "ent-type"),
+            Alias(MolScriptSymbolTable.structureQuery.type.authResidueId, "auth-resid"),
+            Alias(MolScriptSymbolTable.structureQuery.type.labelResidueId, "label-resid"),
+            Alias(MolScriptSymbolTable.structureQuery.type.ringFingerprint, "ringfp"),
+            Alias(MolScriptSymbolTable.structureQuery.type.bondFlags, "bond-flags")
+          ],
+          [
+            "Slots",
+            Alias(MolScriptSymbolTable.structureQuery.slot.elementSetReduce, "atom.set.reduce.value")
+          ],
+          [
+            "Generators",
+            Alias(MolScriptSymbolTable.structureQuery.generator.atomGroups, "sel.atom.atom-groups"),
+            Alias(MolScriptSymbolTable.structureQuery.generator.queryInSelection, "sel.atom.query-in-selection"),
+            Alias(MolScriptSymbolTable.structureQuery.generator.rings, "sel.atom.rings"),
+            Alias(MolScriptSymbolTable.structureQuery.generator.empty, "sel.atom.empty"),
+            Alias(MolScriptSymbolTable.structureQuery.generator.all, "sel.atom.all"),
+            Alias(MolScriptSymbolTable.structureQuery.generator.bondedAtomicPairs, "sel.atom.bonded-pairs"),
+            Macro(MSymbol("sel.atom.atoms", Arguments.Dictionary({
+              0: Argument(Type.Bool, { isOptional: true, defaultValue: true, description: "Test applied to each atom." })
+            }), Types2.ElementSelection, "A selection of singleton atom sets."), (args) => MolScriptBuilder.struct.generator.atomGroups({ "atom-test": tryGetArg(args, 0, true) })),
+            Macro(MSymbol("sel.atom.res", Arguments.Dictionary({
+              0: Argument(Type.Bool, { isOptional: true, defaultValue: true, description: "Test applied to the 1st atom of each residue." })
+            }), Types2.ElementSelection, "A selection of atom sets grouped by residue."), (args) => MolScriptBuilder.struct.generator.atomGroups({
+              "residue-test": tryGetArg(args, 0, true),
+              "group-by": MolScriptBuilder.ammp("residueKey")
+            })),
+            Macro(MSymbol("sel.atom.chains", Arguments.Dictionary({
+              0: Argument(Type.Bool, { isOptional: true, defaultValue: true, description: "Test applied to the 1st atom of each chain." })
+            }), Types2.ElementSelection, "A selection of atom sets grouped by chain."), (args) => MolScriptBuilder.struct.generator.atomGroups({
+              "chain-test": tryGetArg(args, 0, true),
+              "group-by": MolScriptBuilder.ammp("chainKey")
+            }))
+          ],
+          [
+            "Modifiers",
+            Alias(MolScriptSymbolTable.structureQuery.modifier.queryEach, "sel.atom.query-each"),
+            Alias(MolScriptSymbolTable.structureQuery.modifier.intersectBy, "sel.atom.intersect-by"),
+            Alias(MolScriptSymbolTable.structureQuery.modifier.exceptBy, "sel.atom.except-by"),
+            Alias(MolScriptSymbolTable.structureQuery.modifier.unionBy, "sel.atom.union-by"),
+            Alias(MolScriptSymbolTable.structureQuery.modifier.union, "sel.atom.union"),
+            Alias(MolScriptSymbolTable.structureQuery.modifier.cluster, "sel.atom.cluster"),
+            Alias(MolScriptSymbolTable.structureQuery.modifier.includeSurroundings, "sel.atom.include-surroundings"),
+            Alias(MolScriptSymbolTable.structureQuery.modifier.surroundingLigands, "sel.atom.surrounding-ligands"),
+            Alias(MolScriptSymbolTable.structureQuery.modifier.includeConnected, "sel.atom.include-connected"),
+            Alias(MolScriptSymbolTable.structureQuery.modifier.expandProperty, "sel.atom.expand-property")
+            // Macro(MSymbol('sel.atom.around', Arguments.Dictionary({
+            //     0: Argument(Type.Bool, { isOptional: true, defaultValue: true, description: 'Test applied to the 1st atom of each chain.' })
+            // }), Struct.Types.ElementSelection, 'A selection of singleton atom sets with centers within "radius" of the center of any atom in the given selection.'),
+            // args => B.struct.modifier.exceptBy({
+            //     '0': B.struct.filter.within({
+            //         '0': B.struct.generator.atomGroups(), target: M.tryGetArg(args, 0), 'max-radius': M.tryGetArg(args, 'radius')
+            //     }),
+            //     by: M.tryGetArg(args, 0)
+            // }))
+          ],
+          [
+            "Filters",
+            Alias(MolScriptSymbolTable.structureQuery.filter.pick, "sel.atom.pick"),
+            Alias(MolScriptSymbolTable.structureQuery.filter.first, "sel.atom.first"),
+            Alias(MolScriptSymbolTable.structureQuery.filter.withSameAtomProperties, "sel.atom.with-same-atom-properties"),
+            Alias(MolScriptSymbolTable.structureQuery.filter.intersectedBy, "sel.atom.intersected-by"),
+            Alias(MolScriptSymbolTable.structureQuery.filter.within, "sel.atom.within"),
+            Alias(MolScriptSymbolTable.structureQuery.filter.isConnectedTo, "sel.atom.is-connected-to")
+          ],
+          [
+            "Combinators",
+            Alias(MolScriptSymbolTable.structureQuery.combinator.intersect, "sel.atom.intersect"),
+            Alias(MolScriptSymbolTable.structureQuery.combinator.merge, "sel.atom.merge"),
+            Alias(MolScriptSymbolTable.structureQuery.combinator.distanceCluster, "sel.atom.dist-cluster")
+          ],
+          [
+            "Atom Set Properties",
+            Alias(MolScriptSymbolTable.structureQuery.atomSet.atomCount, "atom.set.atom-count"),
+            Alias(MolScriptSymbolTable.structureQuery.atomSet.countQuery, "atom.set.count-query"),
+            Alias(MolScriptSymbolTable.structureQuery.atomSet.reduce, "atom.set.reduce"),
+            Alias(MolScriptSymbolTable.structureQuery.atomSet.propertySet, "atom.set.property")
+            // Macro(MSymbol('atom.set.max', Arguments.Dictionary({
+            //     0: Argument(Type.Num, { description: 'Numeric atom property.'})
+            // }), Type.Num, 'Maximum of the given property in the current atom set.'),
+            // args => M.aggregate(M.tryGetArg(args, 0), B.core.math.max)),
+            // Macro(MSymbol('atom.set.sum', Arguments.Dictionary({
+            //     0: Argument(Type.Num, { description: 'Numeric atom property.'})
+            // }), Type.Num, 'Sum of the given property in the current atom set.'),
+            // args => M.aggregate(M.tryGetArg(args, 0), B.core.math.add, 0)),
+            // Macro(MSymbol('atom.set.avg', Arguments.Dictionary({
+            //     0: Argument(Type.Num, { description: 'Numeric atom property.'})
+            // }), Type.Num, 'Average of the given property in the current atom set.'),
+            // args => B.core.math.div([ M.aggregate(M.tryGetArg(args, 0), B.core.math.add, 0), B.struct.atomSet.atomCount() ])),
+            // Macro(MSymbol('atom.set.min', Arguments.Dictionary({
+            //     0: Argument(Type.Num, { description: 'Numeric atom property.'})
+            // }), Type.Num, 'Minimum of the given property in the current atom set.'),
+            // args => M.aggregate(M.tryGetArg(args, 0), B.core.math.min))
+          ],
+          [
+            "Atom Properties",
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.elementSymbol, "atom.el"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.vdw, "atom.vdw"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.mass, "atom.mass"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.atomicNumber, "atom.atomic-number"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.x, "atom.x"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.y, "atom.y"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.z, "atom.z"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.sourceIndex, "atom.src-index"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.operatorName, "atom.op-name"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.instanceId, "atom.instance-id"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.operatorKey, "atom.op-key"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.modelIndex, "atom.model-index"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.modelLabel, "atom.model-label"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.modelEntryId, "atom.model-entry-id"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.atomKey, "atom.key"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.bondCount, "atom.bond-count"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.topology.connectedComponentKey, "atom.key.molecule"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.authResidueId, "atom.auth-resid"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.labelResidueId, "atom.label-resid"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.residueKey, "atom.key.res"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.chainKey, "atom.key.chain"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityKey, "atom.key.entity"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.isHet, "atom.is-het"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.id, "atom.id"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_atom_id, "atom.label_atom_id"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_alt_id, "atom.label_alt_id", "atom.altloc"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_comp_id, "atom.label_comp_id"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_asym_id, "atom.label_asym_id"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_entity_id, "atom.label_entity_id"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_seq_id, "atom.label_seq_id"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_atom_id, "atom.auth_atom_id", "atom.name"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_comp_id, "atom.auth_comp_id", "atom.resname"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_asym_id, "atom.auth_asym_id", "atom.chain"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_seq_id, "atom.auth_seq_id", "atom.resno"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.pdbx_PDB_ins_code, "atom.pdbx_PDB_ins_code", "atom.inscode"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.pdbx_formal_charge, "atom.pdbx_formal_charge"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.occupancy, "atom.occupancy"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.B_iso_or_equiv, "atom.B_iso_or_equiv", "atom.bfactor"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityType, "atom.entity-type"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entitySubtype, "atom.entity-subtype"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityPrdId, "atom.entity-prd-id"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityDescription, "atom.entity-description"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.objectPrimitive, "atom.object-primitive"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.chemCompType, "atom.chem-comp-type"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.secondaryStructureKey, "atom.key.sec-struct"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.isModified, "atom.is-modified"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.modifiedParentName, "atom.modified-parent"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.ihm.hasSeqId, "atom.ihm.has-seq-id"),
+            Alias(MolScriptSymbolTable.structureQuery.atomProperty.ihm.overlapsSeqIdRange, "atom.ihm.overlaps-seq-id-range")
+            // Macro(MSymbol('atom.sec-struct.is', Arguments.List(Struct.Types.SecondaryStructureFlag), Type.Bool,
+            //     `Test if the current atom is part of an secondary structure. Optionally specify allowed sec. struct. types: ${Type.oneOfValues(Struct.Types.SecondaryStructureFlag).join(', ')}`),
+            // args => B.core.flags.hasAny([B.struct.atomProperty.macromolecular.secondaryStructureFlags(), B.struct.type.secondaryStructureFlags(args)])),
+          ],
+          [
+            "Bond Properties",
+            Alias(MolScriptSymbolTable.structureQuery.bondProperty.order, "bond.order"),
+            Alias(MolScriptSymbolTable.structureQuery.bondProperty.length, "bond.length"),
+            Alias(MolScriptSymbolTable.structureQuery.bondProperty.key, "bond.key"),
+            Alias(MolScriptSymbolTable.structureQuery.bondProperty.atomA, "bond.atom-a"),
+            Alias(MolScriptSymbolTable.structureQuery.bondProperty.atomB, "bond.atom-b"),
+            Macro(MSymbol("bond.is", Arguments.List(Types2.BondFlag), Type.Bool, `Test if the current bond has at least one (or all if partial = false) of the specified flags: ${Type.oneOfValues(Types2.BondFlag).join(", ")}`), (args) => MolScriptBuilder.core.flags.hasAny([MolScriptBuilder.struct.bondProperty.flags(), MolScriptBuilder.struct.type.bondFlags(getPositionalArgs(args))]))
+          ]
+        ]
+      ];
+      list2 = [];
+      makeList(SymbolTable);
+      normalized = (function() {
+        const symbolList2 = [];
+        const symbolMap2 = /* @__PURE__ */ Object.create(null);
+        const namedArgs = UniqueArray.create();
+        const constants = UniqueArray.create();
+        for (const s of list2) {
+          for (const a5 of s.aliases) {
+            symbolList2.push([a5, s]);
+            if (symbolMap2[a5])
+              throw new Error(`Alias '${a5}' already in use.`);
+            symbolMap2[a5] = s;
+          }
+          const args = s.symbol.args;
+          if (args.kind !== "dictionary") {
+            if (args.type.kind === "oneof") {
+              Type.oneOfValues(args.type).forEach((v2) => UniqueArray.add(constants, v2, v2));
+            }
+            continue;
+          }
+          for (const a5 of Object.keys(args.map)) {
+            if (isNaN(a5))
+              UniqueArray.add(namedArgs, a5, a5);
+            const arg = args.map[a5];
+            if (arg.type.kind === "oneof") {
+              Type.oneOfValues(arg.type).forEach((v2) => UniqueArray.add(constants, v2, v2));
+            }
+          }
+        }
+        return { symbolList: symbolList2, symbolMap: symbolMap2, namedArgs: namedArgs.array, constants: constants.array };
+      })();
+      Constants2 = normalized.constants;
+      NamedArgs = normalized.namedArgs;
+      SymbolMap3 = normalized.symbolMap;
+      SymbolList3 = normalized.symbolList;
+    }
+  });
+
+  // node_modules/molstar/lib/mol-util/monadic-parser.js
+  function seqPick(idx, ...parsers) {
+    const numParsers = parsers.length;
+    return new MonadicParser((input, index) => {
+      let result2;
+      let picked;
+      let i = index;
+      for (let j = 0; j < numParsers; j++) {
+        result2 = mergeReplies(parsers[j]._(input, i), result2);
+        if (!result2.status) {
+          return result2;
+        }
+        if (idx === j)
+          picked = result2.value;
+        i = result2.index;
+      }
+      return mergeReplies(makeSuccess(i, picked), result2);
+    });
+  }
+  function makeSuccess(index, value) {
+    return { status: true, index, value };
+  }
+  function makeFailure(index, expected) {
+    return { status: false, furthest: index, expected: [expected] };
+  }
+  function mergeReplies(result2, last3) {
+    if (!last3 || result2.status || last3.status || result2.furthest > last3.furthest) {
+      return result2;
+    }
+    const expected = result2.furthest === last3.furthest ? unsafeUnion(result2.expected, last3.expected) : last3.expected;
+    return { status: result2.status, furthest: last3.furthest, expected };
+  }
+  function makeLineColumnIndex(input, i) {
+    const lines = input.slice(0, i).split("\n");
+    const lineWeAreUpTo = lines.length;
+    const columnWeAreUpTo = lines[lines.length - 1].length + 1;
+    return { offset: i, line: lineWeAreUpTo, column: columnWeAreUpTo };
+  }
+  function formatExpected(expected) {
+    if (expected.length === 1) {
+      return expected[0];
+    }
+    return "one of " + expected.join(", ");
+  }
+  function formatGot(input, error2) {
+    const index = error2.index;
+    const i = index.offset;
+    if (i === input.length) {
+      return ", got the end of the input";
+    }
+    const prefix2 = i > 0 ? "'..." : "'";
+    const suffix = input.length - i > 12 ? "...'" : "'";
+    return ` at line ${index.line} column ${index.column}, got ${prefix2}${input.slice(i, i + 12)}${suffix}`;
+  }
+  function formatError(input, error2) {
+    return `expected ${formatExpected(error2.expected)}${formatGot(input, error2)}`;
+  }
+  function unsafeUnion(xs, ys) {
+    const xn = xs.length;
+    const yn = ys.length;
+    if (xn === 0)
+      return ys;
+    else if (yn === 0)
+      return xs;
+    const set4 = /* @__PURE__ */ new Set();
+    const ret = [];
+    for (let i = 0; i < xn; i++) {
+      if (!set4.has(xs[i])) {
+        ret[ret.length] = xs[i];
+        set4.add(xs[i]);
+      }
+    }
+    for (let i = 0; i < yn; i++) {
+      if (!set4.has(ys[i])) {
+        ret[ret.length] = ys[i];
+        set4.add(ys[i]);
+      }
+    }
+    ret.sort();
+    return ret;
+  }
+  function isParser(obj) {
+    return obj instanceof MonadicParser;
+  }
+  function assertFunction(x) {
+    if (typeof x !== "function") {
+      throw new Error("not a function: " + x);
+    }
+  }
+  var MonadicParser;
+  var init_monadic_parser = __esm({
+    "node_modules/molstar/lib/mol-util/monadic-parser.js"() {
+      MonadicParser = class _MonadicParser {
+        constructor(_) {
+          this._ = _;
+        }
+        parse(input) {
+          const result2 = this.skip(_MonadicParser.eof)._(input, 0);
+          if (result2.status) {
+            return { success: true, value: result2.value };
+          }
+          return { success: false, index: makeLineColumnIndex(input, result2.furthest), expected: result2.expected };
+        }
+        tryParse(str11) {
+          const result2 = this.parse(str11);
+          if (result2.success) {
+            return result2.value;
+          } else {
+            const msg = formatError(str11, result2);
+            const err = new Error(msg);
+            throw err;
+          }
+        }
+        or(alternative) {
+          return _MonadicParser.alt(this, alternative);
+        }
+        trim(parser) {
+          return this.wrap(parser, parser);
+        }
+        wrap(leftParser, rightParser) {
+          return seqPick(1, typeof leftParser === "string" ? _MonadicParser.string(leftParser) : leftParser, this, typeof rightParser === "string" ? _MonadicParser.string(rightParser) : rightParser);
+        }
+        thru(wrapper) {
+          return wrapper(this);
+        }
+        then(next) {
+          return seqPick(1, this, next);
+        }
+        many() {
+          return new _MonadicParser((input, i) => {
+            const accum = [];
+            let result2 = void 0;
+            while (true) {
+              result2 = mergeReplies(this._(input, i), result2);
+              if (result2.status) {
+                if (i === result2.index) {
+                  throw new Error("infinite loop detected in .many() parser --- calling .many() on a parser which can accept zero characters is usually the cause");
+                }
+                i = result2.index;
+                accum.push(result2.value);
+              } else {
+                return mergeReplies(makeSuccess(i, accum), result2);
+              }
+            }
+          });
+        }
+        times(min5, _max) {
+          const max5 = typeof _max === "undefined" ? min5 : _max;
+          return new _MonadicParser((input, i) => {
+            const accum = [];
+            let result2 = void 0;
+            let prevResult = void 0;
+            let times;
+            for (times = 0; times < min5; times++) {
+              result2 = this._(input, i);
+              prevResult = mergeReplies(result2, prevResult);
+              if (result2.status) {
+                i = result2.index;
+                accum.push(result2.value);
+              } else {
+                return prevResult;
+              }
+            }
+            for (; times < max5; times += 1) {
+              result2 = this._(input, i);
+              prevResult = mergeReplies(result2, prevResult);
+              if (result2.status) {
+                i = result2.index;
+                accum.push(result2.value);
+              } else {
+                break;
+              }
+            }
+            return mergeReplies(makeSuccess(i, accum), prevResult);
+          });
+        }
+        result(res) {
+          return this.map(() => res);
+        }
+        atMost(n) {
+          return this.times(0, n);
+        }
+        atLeast(n) {
+          return _MonadicParser.seq(this.times(n), this.many()).map((r) => [...r[0], ...r[1]]);
+        }
+        map(f) {
+          return new _MonadicParser((input, i) => {
+            const result2 = this._(input, i);
+            if (!result2.status) {
+              return result2;
+            }
+            return mergeReplies(makeSuccess(result2.index, f(result2.value)), result2);
+          });
+        }
+        skip(next) {
+          return seqPick(0, this, next);
+        }
+        mark() {
+          return _MonadicParser.seq(_MonadicParser.index, this, _MonadicParser.index).map((r) => ({ start: r[0], value: r[1], end: r[2] }));
+        }
+        node(name) {
+          return _MonadicParser.seq(_MonadicParser.index, this, _MonadicParser.index).map((r) => ({ name, start: r[0], value: r[1], end: r[2] }));
+        }
+        sepBy(separator) {
+          return _MonadicParser.sepBy(this, separator);
+        }
+        sepBy1(separator) {
+          return _MonadicParser.sepBy1(this, separator);
+        }
+        lookahead(x) {
+          return this.skip(_MonadicParser.lookahead(x));
+        }
+        notFollowedBy(x) {
+          return this.skip(_MonadicParser.notFollowedBy(x));
+        }
+        desc(expected) {
+          return new _MonadicParser((input, i) => {
+            const reply = this._(input, i);
+            if (!reply.status) {
+              reply.expected = [expected];
+            }
+            return reply;
+          });
+        }
+        fallback(result2) {
+          return this.or(_MonadicParser.succeed(result2));
+        }
+        ap(other) {
+          return _MonadicParser.seq(other, this).map(([f, x]) => f(x));
+        }
+        chain(f) {
+          return new _MonadicParser((input, i) => {
+            const result2 = this._(input, i);
+            if (!result2.status) {
+              return result2;
+            }
+            const nextParser = f(result2.value);
+            return mergeReplies(nextParser._(input, result2.index), result2);
+          });
+        }
+      };
+      (function(MonadicParser2) {
+        function seqMap(a5, b5, c5) {
+          const args = [].slice.call(arguments);
+          if (args.length === 0) {
+            throw new Error("seqMap needs at least one argument");
+          }
+          const mapper = args.pop();
+          assertFunction(mapper);
+          return seq.apply(null, args).map(function(results) {
+            return mapper.apply(null, results);
+          });
+        }
+        MonadicParser2.seqMap = seqMap;
+        function createLanguage(parsers) {
+          const language = {};
+          for (const key2 of Object.keys(parsers)) {
+            (function(key3) {
+              language[key3] = lazy(() => parsers[key3](language));
+            })(key2);
+          }
+          return language;
+        }
+        MonadicParser2.createLanguage = createLanguage;
+        function seq(...parsers) {
+          const numParsers = parsers.length;
+          return new MonadicParser2((input, index) => {
+            let result2;
+            const accum = new Array(numParsers);
+            let i = index;
+            for (let j = 0; j < numParsers; j++) {
+              result2 = mergeReplies(parsers[j]._(input, i), result2);
+              if (!result2.status) {
+                return result2;
+              }
+              accum[j] = result2.value;
+              i = result2.index;
+            }
+            return mergeReplies(makeSuccess(i, accum), result2);
+          });
+        }
+        MonadicParser2.seq = seq;
+        function alt(...parsers) {
+          const numParsers = parsers.length;
+          if (numParsers === 0) {
+            return fail("zero alternates");
+          }
+          return new MonadicParser2((input, i) => {
+            let result2;
+            for (let j = 0; j < parsers.length; j++) {
+              result2 = mergeReplies(parsers[j]._(input, i), result2);
+              if (result2.status) {
+                return result2;
+              }
+            }
+            return result2;
+          });
+        }
+        MonadicParser2.alt = alt;
+        function sepBy(parser, separator) {
+          return sepBy1(parser, separator).or(succeed([]));
+        }
+        MonadicParser2.sepBy = sepBy;
+        function sepBy1(parser, separator) {
+          const pairs = separator.then(parser).many();
+          return seq(parser, pairs).map((r) => [r[0], ...r[1]]);
+        }
+        MonadicParser2.sepBy1 = sepBy1;
+        function string(str11) {
+          const expected = `'${str11}'`;
+          if (str11.length === 1) {
+            const code = str11.charCodeAt(0);
+            return new MonadicParser2((input, i) => input.charCodeAt(i) === code ? makeSuccess(i + 1, str11) : makeFailure(i, expected));
+          }
+          return new MonadicParser2((input, i) => {
+            const j = i + str11.length;
+            if (input.slice(i, j) === str11)
+              return makeSuccess(j, str11);
+            else
+              return makeFailure(i, expected);
+          });
+        }
+        MonadicParser2.string = string;
+        function flags2(re) {
+          const s = "" + re;
+          return s.slice(s.lastIndexOf("/") + 1);
+        }
+        function anchoredRegexp(re) {
+          return RegExp("^(?:" + re.source + ")", flags2(re));
+        }
+        function regexp(re, group = 0) {
+          const anchored = anchoredRegexp(re);
+          const expected = "" + re;
+          return new MonadicParser2((input, i) => {
+            const match = anchored.exec(input.slice(i));
+            if (match) {
+              if (0 <= group && group <= match.length) {
+                const fullMatch = match[0];
+                const groupMatch = match[group];
+                return makeSuccess(i + fullMatch.length, groupMatch);
+              }
+              const message = `invalid match group (0 to ${match.length}) in ${expected}`;
+              return makeFailure(i, message);
+            }
+            return makeFailure(i, expected);
+          });
+        }
+        MonadicParser2.regexp = regexp;
+        function succeed(value) {
+          return new MonadicParser2((input, i) => makeSuccess(i, value));
+        }
+        MonadicParser2.succeed = succeed;
+        function fail(expected) {
+          return new MonadicParser2((input, i) => makeFailure(i, expected));
+        }
+        MonadicParser2.fail = fail;
+        function lookahead(x) {
+          if (isParser(x)) {
+            return new MonadicParser2((input, i) => {
+              const result2 = x._(input, i);
+              if (result2.status) {
+                result2.index = i;
+                result2.value = null;
+              }
+              return result2;
+            });
+          } else if (typeof x === "string") {
+            return lookahead(string(x));
+          } else if (x instanceof RegExp) {
+            return lookahead(regexp(x));
+          }
+          throw new Error("not a string, regexp, or parser: " + x);
+        }
+        MonadicParser2.lookahead = lookahead;
+        function notFollowedBy(parser) {
+          return new MonadicParser2((input, i) => {
+            const result2 = parser._(input, i);
+            return result2.status ? makeFailure(i, 'not "' + input.slice(i, result2.index) + '"') : makeSuccess(i, null);
+          });
+        }
+        MonadicParser2.notFollowedBy = notFollowedBy;
+        function test(predicate) {
+          return new MonadicParser2((input, i) => {
+            const char = input.charAt(i);
+            if (i < input.length && predicate(char)) {
+              return makeSuccess(i + 1, char);
+            } else {
+              return makeFailure(i, "a character " + predicate);
+            }
+          });
+        }
+        MonadicParser2.test = test;
+        function oneOf(str11) {
+          return test((ch) => str11.indexOf(ch) >= 0);
+        }
+        MonadicParser2.oneOf = oneOf;
+        function noneOf(str11) {
+          return test((ch) => str11.indexOf(ch) < 0);
+        }
+        MonadicParser2.noneOf = noneOf;
+        function range2(begin, end4) {
+          return test((ch) => begin <= ch && ch <= end4).desc(begin + "-" + end4);
+        }
+        MonadicParser2.range = range2;
+        function takeWhile2(predicate) {
+          return new MonadicParser2((input, i) => {
+            let j = i;
+            while (j < input.length && predicate(input.charAt(j))) {
+              j++;
+            }
+            return makeSuccess(j, input.slice(i, j));
+          });
+        }
+        MonadicParser2.takeWhile = takeWhile2;
+        function lazy(f) {
+          const parser = new MonadicParser2((input, i) => {
+            const a5 = f()._;
+            parser._ = a5;
+            return a5(input, i);
+          });
+          return parser;
+        }
+        MonadicParser2.lazy = lazy;
+        function empty() {
+          return fail("empty");
+        }
+        MonadicParser2.empty = empty;
+        MonadicParser2.index = new MonadicParser2(function(input, i) {
+          return makeSuccess(i, makeLineColumnIndex(input, i));
+        });
+        MonadicParser2.anyChar = new MonadicParser2((input, i) => {
+          if (i >= input.length) {
+            return makeFailure(i, "any character");
+          }
+          return makeSuccess(i + 1, input.charAt(i));
+        });
+        MonadicParser2.all = new MonadicParser2(function(input, i) {
+          return makeSuccess(input.length, input.slice(i));
+        });
+        MonadicParser2.eof = new MonadicParser2(function(input, i) {
+          if (i < input.length) {
+            return makeFailure(i, "EOF");
+          }
+          return makeSuccess(i, null);
+        });
+        MonadicParser2.digit = regexp(/[0-9]/).desc("a digit");
+        MonadicParser2.digits = regexp(/[0-9]*/).desc("optional digits");
+        MonadicParser2.letter = regexp(/[a-z]/i).desc("a letter");
+        MonadicParser2.letters = regexp(/[a-z]*/i).desc("optional letters");
+        MonadicParser2.optWhitespace = regexp(/\s*/).desc("optional whitespace");
+        MonadicParser2.whitespace = regexp(/\s+/).desc("whitespace");
+        MonadicParser2.cr = string("\r");
+        MonadicParser2.lf = string("\n");
+        MonadicParser2.crlf = string("\r\n");
+        MonadicParser2.newline = alt(MonadicParser2.crlf, MonadicParser2.lf, MonadicParser2.cr).desc("newline");
+        MonadicParser2.end = alt(MonadicParser2.newline, MonadicParser2.eof);
+        function of(value) {
+          return succeed(value);
+        }
+        MonadicParser2.of = of;
+        function regex(re) {
+          return regexp(re);
+        }
+        MonadicParser2.regex = regex;
+      })(MonadicParser || (MonadicParser = {}));
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/language/parser.js
+  function parseMolScript(input) {
+    return Language.parse(input);
+  }
+  var Language;
+  var init_parser4 = __esm({
+    "node_modules/molstar/lib/mol-script/language/parser.js"() {
+      init_monadic_parser();
+      init_expression();
+      init_builder();
+      init_type_helpers();
+      (function(Language2) {
+        let ASTNode;
+        (function(ASTNode2) {
+          function str11(value) {
+            return { kind: "string", value };
+          }
+          ASTNode2.str = str11;
+          function symb(value) {
+            return { kind: "symbol", value };
+          }
+          ASTNode2.symb = symb;
+          function list3(bracket, nodes) {
+            return { kind: "list", bracket, nodes };
+          }
+          ASTNode2.list = list3;
+          function comment(value) {
+            return { kind: "comment", value };
+          }
+          ASTNode2.comment = comment;
+        })(ASTNode || (ASTNode = {}));
+        const ws = MonadicParser.regexp(/[\n\r\s]*/);
+        const Expr = MonadicParser.lazy(() => MonadicParser.alt(Str, List4, Symb, Comment).trim(ws));
+        const Str = MonadicParser.takeWhile((c5) => c5 !== "`").trim("`").map(ASTNode.str);
+        const Symb = MonadicParser.regexp(/[^()\[\]{};`,\n\r\s]+/).map(ASTNode.symb);
+        const Comment = MonadicParser.regexp(/\s*;+([^\n\r]*)\n/, 1).map(ASTNode.comment);
+        const Args = Expr.many();
+        const List1 = Args.wrap("(", ")").map((args) => ASTNode.list("(", args));
+        const List22 = Args.wrap("[", "]").map((args) => ASTNode.list("[", args));
+        const List32 = Args.wrap("{", "}").map((args) => ASTNode.list("{", args));
+        const List4 = MonadicParser.alt(List1, List22, List32);
+        const Expressions = Expr.many();
+        function getAST(input) {
+          return Expressions.tryParse(input);
+        }
+        function visitExpr(expr) {
+          switch (expr.kind) {
+            case "string":
+              return expr.value;
+            case "symbol": {
+              const value = expr.value;
+              if (value.length > 1) {
+                const fst = value.charAt(0);
+                switch (fst) {
+                  case ".":
+                    return MolScriptBuilder.atomName(value.substr(1));
+                  case "_":
+                    return MolScriptBuilder.struct.type.elementSymbol([value.substr(1)]);
+                }
+              }
+              if (value === "true")
+                return true;
+              if (value === "false")
+                return false;
+              if (isNumber(value))
+                return +value;
+              return Expression.Symbol(value);
+            }
+            case "list": {
+              switch (expr.bracket) {
+                case "[":
+                  return MolScriptBuilder.core.type.list(withoutComments(expr.nodes).map(visitExpr));
+                case "{":
+                  return MolScriptBuilder.core.type.set(withoutComments(expr.nodes).map(visitExpr));
+                case "(": {
+                  if (expr.nodes[0].kind === "comment")
+                    throw new Error("Invalid expression");
+                  const head = visitExpr(expr.nodes[0]);
+                  return Expression.Apply(head, getArgs(expr.nodes));
+                }
+                default:
+                  assertUnreachable(expr.bracket);
+              }
+            }
+            default:
+              assertUnreachable(expr);
+          }
+        }
+        function getArgs(nodes) {
+          if (nodes.length <= 1)
+            return void 0;
+          if (!hasNamedArgs(nodes)) {
+            const args2 = [];
+            for (let i = 1, _i = nodes.length; i < _i; i++) {
+              const n = nodes[i];
+              if (n.kind === "comment")
+                continue;
+              args2[args2.length] = visitExpr(n);
+            }
+            return args2;
+          }
+          const args = {};
+          let allNumeric = true;
+          let pos = 0;
+          for (let i = 1, _i = nodes.length; i < _i; i++) {
+            const n = nodes[i];
+            if (n.kind === "comment")
+              continue;
+            if (n.kind === "symbol" && n.value.length > 1 && n.value.charAt(0) === ":") {
+              const name = n.value.substr(1);
+              ++i;
+              while (i < _i && nodes[i].kind === "comment") {
+                i++;
+              }
+              if (i >= _i)
+                throw new Error(`There must be a value foolowed a named arg ':${name}'.`);
+              if (nodes[i].kind === "comment")
+                throw new Error("Invalid expression");
+              args[name] = visitExpr(nodes[i]);
+              if (isNaN(+name))
+                allNumeric = false;
+            } else {
+              args[pos++] = visitExpr(n);
+            }
+          }
+          if (allNumeric) {
+            const keys2 = Object.keys(args).map((a5) => +a5).sort((a5, b5) => a5 - b5);
+            let isArray = true;
+            for (let i = 0, _i = keys2.length; i < _i; i++) {
+              if (keys2[i] !== i) {
+                isArray = false;
+                break;
+              }
+            }
+            if (isArray) {
+              const arrayArgs = [];
+              for (let i = 0, _i = keys2.length; i < _i; i++) {
+                arrayArgs[i] = args[i];
+              }
+              return arrayArgs;
+            }
+          }
+          return args;
+        }
+        function hasNamedArgs(nodes) {
+          for (let i = 1, _i = nodes.length; i < _i; i++) {
+            const n = nodes[i];
+            if (n.kind === "symbol" && n.value.length > 1 && n.value.charAt(0) === ":")
+              return true;
+          }
+          return false;
+        }
+        function withoutComments(nodes) {
+          let hasComment = false;
+          for (let i = 0, _i = nodes.length; i < _i; i++) {
+            if (nodes[i].kind === "comment") {
+              hasComment = true;
+              break;
+            }
+          }
+          if (!hasComment)
+            return nodes;
+          return nodes.filter((n) => n.kind !== "comment");
+        }
+        function isNumber(value) {
+          return /-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?/.test(value) && !isNaN(+value);
+        }
+        function parse5(input) {
+          const ast = getAST(input);
+          const ret = [];
+          for (const expr of ast) {
+            if (expr.kind === "comment")
+              continue;
+            ret[ret.length] = visitExpr(expr);
+          }
+          return ret;
+        }
+        Language2.parse = parse5;
+      })(Language || (Language = {}));
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/helper.js
+  function prefix(opParser, nextParser, mapFn) {
+    const parser = MonadicParser.lazy(() => {
+      return MonadicParser.seq(opParser, parser).map((x) => mapFn(...x)).or(nextParser);
+    });
+    return parser;
+  }
+  function postfix(opParser, nextParser, mapFn) {
+    return MonadicParser.seqMap(nextParser, opParser.many(), (x, suffixes) => suffixes.reduce((acc, x2) => {
+      return mapFn(x2, acc);
+    }, x));
+  }
+  function binaryLeft(opParser, nextParser, mapFn) {
+    return MonadicParser.seqMap(nextParser, MonadicParser.seq(opParser, nextParser).many(), (first4, rest2) => {
+      return rest2.reduce((acc, ch) => {
+        const [op2, another] = ch;
+        return mapFn(op2, acc, another);
+      }, first4);
+    });
+  }
+  function combineOperators(opList, rule) {
+    const x = opList.reduce((acc, level) => {
+      const map3 = level.isUnsupported ? makeError(`operator '${level.name}' not supported`) : level.map;
+      return level.type(level.rule, acc, map3);
+    }, rule);
+    return x;
+  }
+  function infixOp(re, group = 0) {
+    return MonadicParser.optWhitespace.then(MonadicParser.regexp(re, group).skip(MonadicParser.optWhitespace));
+  }
+  function prefixOp(re, group = 0) {
+    return MonadicParser.regexp(re, group).skip(MonadicParser.optWhitespace);
+  }
+  function postfixOp(re, group = 0) {
+    return MonadicParser.optWhitespace.then(MonadicParser.regexp(re, group));
+  }
+  function ofOp(name, short) {
+    const op2 = short ? `${name}|${escapeRegExp(short)}` : name;
+    const re = RegExp(`(${op2})\\s+([-+]?[0-9]*\\.?[0-9]+)\\s+OF`, "i");
+    return infixOp(re, 2).map(parseFloat);
+  }
+  function makeError(msg) {
+    return function() {
+      throw new Error(msg);
+    };
+  }
+  function andExpr(selections) {
+    if (selections.length === 1) {
+      return selections[0];
+    } else if (selections.length > 1) {
+      return B.core.logic.and(selections);
+    } else {
+      return void 0;
+    }
+  }
+  function orExpr(selections) {
+    if (selections.length === 1) {
+      return selections[0];
+    } else if (selections.length > 1) {
+      return B.core.logic.or(selections);
+    } else {
+      return void 0;
+    }
+  }
+  function testExpr(property2, args) {
+    if (args && args.op !== void 0 && args.val !== void 0) {
+      const opArgs = [property2, args.val];
+      switch (args.op) {
+        case "=":
+          return B.core.rel.eq(opArgs);
+        case "!=":
+          return B.core.rel.neq(opArgs);
+        case ">":
+          return B.core.rel.gr(opArgs);
+        case "<":
+          return B.core.rel.lt(opArgs);
+        case ">=":
+          return B.core.rel.gre(opArgs);
+        case "<=":
+          return B.core.rel.lte(opArgs);
+        default:
+          throw new Error(`operator '${args.op}' not supported`);
+      }
+    } else if (args && args.flags !== void 0) {
+      return B.core.flags.hasAny([property2, args.flags]);
+    } else if (args && args.min !== void 0 && args.max !== void 0) {
+      return B.core.rel.inRange([property2, args.min, args.max]);
+    } else if (!Array.isArray(args)) {
+      return B.core.rel.eq([property2, args]);
+    } else if (args.length > 1) {
+      return B.core.set.has([B.core.type.set(args), property2]);
+    } else {
+      return B.core.rel.eq([property2, args[0]]);
+    }
+  }
+  function invertExpr(selection) {
+    return B.struct.generator.queryInSelection({
+      0: selection,
+      query: B.struct.generator.all(),
+      "in-complement": true
+    });
+  }
+  function strLenSortFn(a5, b5) {
+    return a5.length < b5.length ? 1 : -1;
+  }
+  function getNamesRegex(name, abbr) {
+    const names = (abbr ? [name].concat(abbr) : [name]).sort(strLenSortFn).map(escapeRegExp).join("|");
+    return RegExp(`${names}`, "i");
+  }
+  function getPropertyRules(properties4) {
+    const propertiesDict2 = {};
+    Object.keys(properties4).sort(strLenSortFn).forEach((name) => {
+      const ps = properties4[name];
+      const errorFn = makeError(`property '${name}' not supported`);
+      const rule = MonadicParser.regexp(ps.regex).map((x) => {
+        if (ps.isUnsupported)
+          errorFn();
+        return testExpr(ps.property, ps.map(x));
+      });
+      if (!ps.isNumeric) {
+        propertiesDict2[name] = rule;
+      }
+    });
+    return propertiesDict2;
+  }
+  function getNamedPropertyRules(properties4) {
+    const namedPropertiesList = [];
+    Object.keys(properties4).sort(strLenSortFn).forEach((name) => {
+      const ps = properties4[name];
+      const errorFn = makeError(`property '${name}' not supported`);
+      const rule = MonadicParser.regexp(ps.regex).map((x) => {
+        if (ps.isUnsupported)
+          errorFn();
+        return testExpr(ps.property, ps.map(x));
+      });
+      const nameRule = MonadicParser.regexp(getNamesRegex(name, ps.abbr)).trim(MonadicParser.optWhitespace);
+      const groupMap = (x) => B.struct.generator.atomGroups({ [ps.level]: x });
+      if (ps.isNumeric) {
+        namedPropertiesList.push(nameRule.then(MonadicParser.seq(MonadicParser.regexp(/>=|<=|=|!=|>|</).trim(MonadicParser.optWhitespace), MonadicParser.regexp(ps.regex).map(ps.map))).map((x) => {
+          if (ps.isUnsupported)
+            errorFn();
+          return testExpr(ps.property, { op: x[0], val: x[1] });
+        }).map(groupMap));
+      } else {
+        namedPropertiesList.push(nameRule.then(rule).map(groupMap));
+      }
+    });
+    return namedPropertiesList;
+  }
+  function getKeywordRules(keywords4) {
+    const keywordsList = [];
+    Object.keys(keywords4).sort(strLenSortFn).forEach((name) => {
+      const ks = keywords4[name];
+      const mapFn = ks.map ? ks.map : makeError(`keyword '${name}' not supported`);
+      const rule = MonadicParser.regexp(getNamesRegex(name, ks.abbr)).map(mapFn);
+      keywordsList.push(rule);
+    });
+    return keywordsList;
+  }
+  function getFunctionRules(functions2, argRule) {
+    const functionsList = [];
+    const begRule = MonadicParser.regexp(/\(\s*/);
+    const endRule = MonadicParser.regexp(/\s*\)/);
+    Object.keys(functions2).sort(strLenSortFn).forEach((name) => {
+      const fs = functions2[name];
+      const mapFn = fs.map ? fs.map : makeError(`function '${name}' not supported`);
+      const rule = MonadicParser.regexp(new RegExp(name, "i")).skip(begRule).then(argRule).skip(endRule).map(mapFn);
+      functionsList.push(rule);
+    });
+    return functionsList;
+  }
+  function getPropertyNameRules(properties4, lookahead) {
+    const list3 = [];
+    Object.keys(properties4).sort(strLenSortFn).forEach((name) => {
+      const ps = properties4[name];
+      const errorFn = makeError(`property '${name}' not supported`);
+      const rule = MonadicParser.regexp(getNamesRegex(name, ps.abbr)).lookahead(lookahead).map(() => {
+        if (ps.isUnsupported)
+          errorFn();
+        return ps.property;
+      });
+      list3.push(rule);
+    });
+    return list3;
+  }
+  function getReservedWords(properties4, keywords4, operators4, functions2) {
+    const w = [];
+    for (const name in properties4) {
+      w.push(name);
+      if (properties4[name].abbr)
+        w.push(...properties4[name].abbr);
+    }
+    for (const name in keywords4) {
+      w.push(name);
+      if (keywords4[name].abbr)
+        w.push(...keywords4[name].abbr);
+    }
+    operators4.forEach((o) => {
+      w.push(o.name);
+      if (o.abbr)
+        w.push(...o.abbr);
+    });
+    return w;
+  }
+  function atomNameSet(ids) {
+    return B.core.type.set(ids.map(B.atomName));
+  }
+  function asAtoms(e) {
+    return B.struct.generator.queryInSelection({
+      0: e,
+      query: B.struct.generator.all()
+    });
+  }
+  function wrapValue(property2, value, sstrucDict3) {
+    switch (property2.head.name) {
+      case "structure-query.atom-property.macromolecular.label_atom_id":
+        return B.atomName(value);
+      case "structure-query.atom-property.core.element-symbol":
+        return B.es(value);
+      case "structure-query.atom-property.macromolecular.secondary-structure-flags":
+        if (sstrucDict3) {
+          value = [sstrucDict3[value.toUpperCase()] || "none"];
+        }
+        return B.struct.type.secondaryStructureFlags([value]);
+      default:
+        return value;
+    }
+  }
+  function testLevel(property2) {
+    if (property2.head.name.startsWith(propPrefix)) {
+      const name = property2.head.name.substr(propPrefix.length);
+      if (entityProps.includes(name))
+        return "entity-test";
+      if (chainProps.includes(name))
+        return "chain-test";
+      if (residueProps.includes(name))
+        return "residue-test";
+    }
+    return "atom-test";
+  }
+  function valuesTest(property2, values2) {
+    if (flagProps.includes(property2.head.name)) {
+      const name = values2[0].head;
+      const flags2 = [];
+      values2.forEach((v2) => flags2.push(...v2.args[0]));
+      return B.core.flags.hasAny([property2, { head: name, args: flags2 }]);
+    } else {
+      if (values2.length === 1) {
+        return B.core.rel.eq([property2, values2[0]]);
+      } else if (values2.length > 1) {
+        return B.core.set.has([B.core.type.set(values2), property2]);
+      }
+    }
+  }
+  function resnameExpr(resnameList) {
+    return B.struct.generator.atomGroups({
+      "residue-test": B.core.set.has([
+        B.core.type.set(resnameList),
+        B.ammp("label_comp_id")
+      ])
+    });
+  }
+  var B, propPrefix, entityProps, chainProps, residueProps, flagProps;
+  var init_helper = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/helper.js"() {
+      init_monadic_parser();
+      init_builder();
+      init_string();
+      B = MolScriptBuilder;
+      propPrefix = "structure-query.atom-property.macromolecular.";
+      entityProps = ["entityKey", "label_entity_id", "entityType"];
+      chainProps = ["chainKey", "label_asym_id", "label_entity_id", "auth_asym_id", "entityType"];
+      residueProps = ["residueKey", "label_comp_id", "label_seq_id", "auth_comp_id", "auth_seq_id", "pdbx_formal_charge", "secondaryStructureKey", "secondaryStructureFlags", "isModified", "modifiedParentName"];
+      flagProps = [
+        "structure-query.atom-property.macromolecular.secondary-structure-flags"
+      ];
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/jmol/properties.js
+  function str9(x) {
+    return x;
+  }
+  function structureMap(x) {
+    if (x.head) {
+      if (x.head.name && x.head.name === "core.type.regex")
+        x = x.args[0].replace(/^\^|\$$/g, "");
+      x = structureDict[x.toString().toLowerCase()] || "none";
+      if (["dna", "rna", "carbohydrate"].indexOf(x) !== -1) {
+        throw new Error("values 'dna', 'rna', 'carbohydrate' not yet supported for 'structure' property");
+      } else {
+        return B2.struct.type.secondaryStructureFlags([x]);
+      }
+    }
+  }
+  var B2, reFloat, rePosInt, structureDict, properties;
+  var init_properties3 = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/jmol/properties.js"() {
+      init_builder();
+      B2 = MolScriptBuilder;
+      reFloat = /[-+]?[0-9]*\.?[0-9]+/;
+      rePosInt = /[0-9]+/;
+      structureDict = {
+        none: "none",
+        turn: "turn",
+        sheet: "beta",
+        helix: "helix",
+        dna: "dna",
+        rna: "rna",
+        carbohydrate: "carbohydrate",
+        helix310: "3-10",
+        helixalpha: "alpha",
+        helixpi: "pi",
+        0: "none",
+        1: "turn",
+        2: "beta",
+        3: "helix",
+        4: "dna",
+        5: "rna",
+        6: "carbohydrate",
+        7: "3-10",
+        8: "alpha",
+        9: "pi"
+      };
+      properties = {
+        adpmax: {
+          "@desc": "the maximum anisotropic displacement parameter for the selected atom",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: reFloat,
+          map: (x) => parseFloat(x),
+          level: "atom-test"
+        },
+        adpmin: {
+          "@desc": "the minimum anisotropic displacement parameter for the selected atom",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: reFloat,
+          map: (x) => parseFloat(x),
+          level: "atom-test"
+        },
+        altloc: {
+          "@desc": "PDB alternate location identifier",
+          "@examples": ["altloc = A"],
+          regex: /[a-zA-Z0-9]/,
+          map: str9,
+          level: "atom-test",
+          property: B2.ammp("label_alt_id")
+        },
+        altname: {
+          "@desc": "an alternative name given to atoms by some file readers (for example, P2N)",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[a-zA-Z0-9]/,
+          map: str9,
+          level: "atom-test"
+        },
+        atomID: {
+          "@desc": "special atom IDs for PDB atoms assigned by Jmol",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: rePosInt,
+          map: (x) => parseInt(x),
+          level: "atom-test"
+        },
+        atomIndex: {
+          "@desc": "atom 0-based index; a unique number for each atom regardless of the number of models loaded",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: rePosInt,
+          map: (x) => parseInt(x),
+          level: "atom-test"
+        },
+        atomName: {
+          "@desc": "atom name",
+          "@examples": ["atomName = CA"],
+          regex: /[a-zA-Z0-9]+/,
+          map: (v2) => B2.atomName(v2),
+          level: "atom-test",
+          property: B2.ammp("label_atom_id")
+        },
+        atomno: {
+          "@desc": 'sequential number; you can use "@" instead of "atomno=" -- for example, select @33 or Var x = @33 or @35',
+          "@examples": [""],
+          isUnsupported: true,
+          regex: rePosInt,
+          map: (x) => parseInt(x),
+          level: "atom-test"
+        },
+        atomType: {
+          "@desc": "atom type (mol2, AMBER files) or atom name (other file types)",
+          "@examples": ["atomType = OH"],
+          regex: /[a-zA-Z0-9]+/,
+          map: (v2) => B2.atomName(v2),
+          level: "atom-test",
+          property: B2.ammp("label_atom_id")
+        },
+        atomX: {
+          "@desc": "Cartesian X coordinate (or just X)",
+          "@examples": ["x = 4.2"],
+          abbr: ["X"],
+          isNumeric: true,
+          regex: reFloat,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B2.acp("x")
+        },
+        atomY: {
+          "@desc": "Cartesian Y coordinate (or just Y)",
+          "@examples": ["y < 42"],
+          abbr: ["Y"],
+          isNumeric: true,
+          regex: reFloat,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B2.acp("y")
+        },
+        atomZ: {
+          "@desc": "Cartesian Z coordinate (or just Z)",
+          "@examples": ["Z > 10"],
+          abbr: ["Z"],
+          isNumeric: true,
+          regex: reFloat,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B2.acp("z")
+        },
+        bondcount: {
+          "@desc": "covalent bond count",
+          "@examples": ["bondcount = 0"],
+          isNumeric: true,
+          regex: rePosInt,
+          map: (x) => parseInt(x),
+          level: "atom-test",
+          property: B2.acp("bondCount")
+        },
+        bondingRadius: {
+          "@desc": "radius used for auto bonding; synonymous with ionic and ionicRadius",
+          "@examples": [""],
+          abbr: ["ionic", "ionicRadius"],
+          isUnsupported: true,
+          regex: reFloat,
+          map: (x) => parseFloat(x),
+          level: "atom-test"
+        },
+        cell: {
+          "@desc": 'crystallographic unit cell, expressed either in lattice integer notation (111-999) or as a coordinate in ijk space, where {1 1 1} is the same as 555. ANDing two cells, for example select cell=555 and cell=556, selects the atoms on the common face. (Note: in the specifc case of CELL, only "=" is allowed as a comparator.)',
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        configuration: {
+          "@desc": 'Only in the context {configuration=n}, this option selects the set of atoms with either no ALTLOC specified or those atoms having this index into the array of altlocs within its model. So, for example, if the model has altloc "A" and "B", select configuration=1 is equivalent to select altloc="" or altloc="A", and print {configuration=2} is equivalent to print {altloc="" or altloc="B"}. Configuration 0 is "all atoms in a model having configurations", and an invalid configuration number gives no atoms. (Note: in the specifc case of CONFIGURATION, only "=" is allowed as a comparator.)',
+          "@examples": [""],
+          isUnsupported: true,
+          regex: rePosInt,
+          map: (x) => parseInt(x),
+          level: "atom-test"
+        },
+        chain: {
+          "@desc": 'protein chain. For newer CIF files allowing multicharacter chain specifications, use quotations marks: select chain="AA". For these multicharacter desigations, case is not checked unless the CIF file has lower-case chain designations.',
+          "@examples": ["chain = A", 'chain = "AA"'],
+          regex: /[a-zA-Z0-9]+/,
+          map: str9,
+          level: "chain-test",
+          property: B2.ammp("auth_asym_id")
+        },
+        chainNo: {
+          "@desc": 'chain number; sequentially counted from 1 for each model; chainNo == 0 means"no chain" or PDB chain identifier indicated as a blank (Jmol 14.0).',
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        color: {
+          "@desc": "the atom color",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        covalentRadius: {
+          "@desc": "covalent bonding radius, synonymous with covalent. Not used by Jmol, but could be used, for example, in {*}.spacefill={*}.covalentRadius.all.",
+          "@examples": [""],
+          abbr: ["covalent"],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        cs: {
+          "@desc": "chemical shift calculated using computational results that include magnetic shielding tensors.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        element: {
+          "@desc": 'element symbol. The value of this parameter depends upon the context. Used with select structure=x, x can be either the quoted element symbol, "H", "He", "Li", etc. or atomic number. In all other contexts, the value is the element symbol. When the atom is a specific isotope, the string will contain the isotope number -- "13C", for example.',
+          "@examples": ["element=Fe"],
+          regex: /[a-zA-Z]+/,
+          map: (x) => B2.es(x),
+          level: "atom-test",
+          property: B2.acp("elementSymbol")
+        },
+        elemno: {
+          "@desc": "atomic element number",
+          "@examples": ["elemno=8"],
+          regex: /[0-9\s{}-]+/,
+          map: (x) => parseInt(x),
+          level: "atom-test",
+          property: B2.acp("atomicNumber")
+        },
+        eta: {
+          "@desc": `Based on Carlos M. Duarte, Leven M. Wadley, and Anna Marie Pyle, RNA structure comparison, motif search and discovery using a reduced representation of RNA conformational space, Nucleic Acids Research, 2003, Vol. 31, No. 16 4755-4761. The parameter eta is the C4'[i-1]-P[i]-C4'[i]-P[i+1] dihedral angle; theta is the P[i]-C4'[i]-P[i+1]-C4'[i+1] dihedral angle. Both are measured on a 0-360 degree scale because they are commonly near 180 degrees. Using the commands plot PROPERTIES eta theta resno; select visible;wireframe only one can create these authors' "RNA worm" graph.`,
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        theta: {
+          "@desc": `Based on Carlos M. Duarte, Leven M. Wadley, and Anna Marie Pyle, RNA structure comparison, motif search and discovery using a reduced representation of RNA conformational space, Nucleic Acids Research, 2003, Vol. 31, No. 16 4755-4761. The parameter eta is the C4'[i-1]-P[i]-C4'[i]-P[i+1] dihedral angle; theta is the P[i]-C4'[i]-P[i+1]-C4'[i+1] dihedral angle. Both are measured on a 0-360 degree scale because they are commonly near 180 degrees. Using the commands plot PROPERTIES eta theta resno; select visible;wireframe only one can create these authors' "RNA worm" graph.`,
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        file: {
+          "@desc": "file number containing this atom",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        formalCharge: {
+          "@desc": "formal charge",
+          "@examples": ["formalCharge=1"],
+          regex: reFloat,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B2.ammp("pdbx_formal_charge")
+        },
+        format: {
+          "@desc": "format (label) of the atom.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        fXyz: {
+          "@desc": "fractional XYZ coordinates",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        fX: {
+          "@desc": "fractional X coordinate",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        fY: {
+          "@desc": "fractional Y coordinate",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        fZ: {
+          "@desc": "fractional Z coordinate",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        fuxyz: {
+          "@desc": "fractional XYZ coordinates in the unitcell coordinate system",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        fux: {
+          "@desc": "fractional X coordinate in the unitcell coordinate system",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        fuy: {
+          "@desc": "fractional Y coordinate in the unitcell coordinate system",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        fuz: {
+          "@desc": "fractional Z coordinate in the unit cell coordinate system",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        group: {
+          "@desc": "3-letter residue code",
+          "@examples": ["group = ALA"],
+          regex: /[a-zA-Z0-9]{1,3}/,
+          map: str9,
+          level: "residue-test",
+          property: B2.ammp("label_comp_id")
+        },
+        group1: {
+          "@desc": "single-letter residue code (amino acids only)",
+          "@examples": ["group1 = G"],
+          regex: /[a-zA-Z]/,
+          map: str9,
+          level: "residue-test",
+          property: B2.ammp("label_comp_id")
+        },
+        groupID: {
+          "@desc": "group ID number: A unique ID for each amino acid or nucleic acid residue in a PDB file. 0  noGroup 1-5  ALA, ARG, ASN, ASP, CYS 6-10  GLN, GLU, GLY, HIS, ILE 11-15  LEU, LYS, MET, PHE, PRO 16-20  SER, THR, TRP, TYR, VAL 21-23  ASX, GLX, UNK 24-29  A, +A, G, +G, I, +I 30-35  C, +C, T, +T, U, +U Additional unique numbers are assigned arbitrarily by Jmol and cannot be used reproducibly.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        groupindex: {
+          "@desc": "overall group index",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        hydrophobicity: {
+          "@desc": "Aminoacid residue scale of hydrophobicity based on Rose, G. D., Geselowitz, A. R., Lesser, G. J., Lee, R. H., and Zehfus, M. H. (1985). Hydrophobicity of amino acid residues in globular proteins, Science, 229(4716):834-838.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        identify: {
+          "@desc": "for a PDB/mmCIF file, a label such as [ILE]7^1:A.CD1%A/3 #47, which includes the group ([ILE]), residue number with optional insertion code (7^1), chain (:A), atom name (CD1), alternate location if present (%A), PDB model number (/3, for NMR models when one file is loaded; /file.model such as /2.3 if more than one file is loaded), and atom number (#47). For non-PDB data, the information is shorter -- for example, H15/2.1 #6, indicating atom name (H15), full file.model number (/2.1), and atom number (#6). If only a single model is loaded, %[identify] does not include the model number.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        insertion: {
+          "@desc": "protein residue insertion code",
+          "@examples": ["insertion=A"],
+          regex: /[a-zA-Z0-9]/,
+          map: str9,
+          level: "atom-test",
+          property: B2.ammp("pdbx_PDB_ins_code")
+        },
+        label: {
+          "@desc": "current atom label (same as format)",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        mass: {
+          "@desc": "atomic mass -- especially useful with appended .max or .sum",
+          "@examples": ["mass > 13"],
+          regex: reFloat,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B2.acp("mass")
+        },
+        model: {
+          "@desc": "model number",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        modelindex: {
+          "@desc": "a unique number for each model, starting with 0 and spanning all models in all files",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        modO: {
+          "@desc": "currently calculated occupancy from modulation (0 to 100; NaN if atom has no occupancy modulation)",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        modXYZ: {
+          "@desc": "currently calculated displacement modulation (for incommensurately modulated structures). Also modX, modY, modZ for individual components. For atoms without modultion, {xx}.modXYZ is -1 and {xx}.modX is NaN, and in a label %[modXYZ] and %[modX] are blank.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        molecule: {
+          "@desc": "molecule number",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        monomer: {
+          "@desc": "monomer number (group number) in a polymer (usually a chain), starting with 1, or 0 if not part of a biopolymer -- that is, not a connected carbohydrate, amino acid, or nucleic acid (Jmol 14.3.15)",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        ms: {
+          "@desc": "magnetic shielding calculated from file-loaded tensors.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        occupancy: {
+          "@desc": 'CIF file site occupancy. In SELECT command comparisons ("select occupancy < 90"), an integer n implies measurement on a 0-100 scale; also, in the context %[occupancy] or %q for a label, the reported number is a percentage. In all other cases, such as when %Q is used in a label or when a decimal number is used in a comparison, the scale is 0.0 - 1.0.',
+          "@examples": ["occupancy < 1"],
+          regex: reFloat,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B2.ammp("occupancy")
+        },
+        partialCharge: {
+          "@desc": "partial charge",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: reFloat,
+          map: (x) => parseFloat(x),
+          level: "atom-test"
+        },
+        phi: {
+          "@desc": "protein group PHI angle for atom's residue",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        polymer: {
+          "@desc": "sequential polymer number in a model, starting with 1.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        polymerLength: {
+          "@desc": "polymer length",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        property_xx: {
+          "@desc": "a property created using the DATA command",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        psi: {
+          "@desc": "protein group PSI angle for the atom's residue",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        radius: {
+          "@desc": 'currently displayed radius -- In SELECT command comparisons ("select radius=n"), integer n implies Rasmol units 1/250 Angstroms; in all other cases or when a decimal number is used, the units are Angstroms.',
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        resno: {
+          "@desc": "PDB residue number, not including insertion code (see also seqcode, below)",
+          "@examples": ["resno = 100"],
+          regex: /-?[0-9]+/,
+          map: (x) => parseInt(x),
+          level: "residue-test",
+          property: B2.ammp("auth_seq_id")
+        },
+        selected: {
+          "@desc": "1.0 if atom is selected; 0.0 if not",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        sequence: {
+          "@desc": 'PDB one-character sequence code, as a string of characters, with "?" indicated where single-character codes are not available',
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        seqcode: {
+          "@desc": 'PDB residue number, including insertion code (for example, 234^2; "seqcode" option added in Jmol 14.3.16)',
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        seqid: {
+          "@desc": "(mmCIF only) the value from _atom_site.label_seq_id; a pointer to _entity_poly_seq.num in the ENTITY_POLY_SEQ category specifying the sequence of monomers in a polymer. Allowance is made for the possibility of microheterogeneity in a sample by allowing a given sequence number to be correlated with more than one monomer id. (Jmol 14.2.3)",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        shape: {
+          "@desc": 'hybridization geometry such as "tetrahedral"',
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        site: {
+          "@desc": "crystallographic site number",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        spacefill: {
+          "@desc": "currently displayed radius",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        straightness: {
+          "@desc": 'quaternion-derived straightness (second derivative of the quaternion describing the orientation of the residue. This quantity will have different values depending upon the setting of quaternionFrame as "A" (alpha-carbon/phosphorus atom only), "C" (alpha-carbon/pyrimidine or purine base based), "P" (carbonyl-carbon peptide plane/phosphorus tetrahedron based), or "N" (amide-nitrogen based). The default is alpha-carbon based, which corresponds closely to the following combination of Ramachandran angles involving three consecutive residues i-1, i, and i+1: -psii-1 - phii + psii + phii+1.',
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        strucno: {
+          "@desc": "a unique number for each helix, sheet, or turn in a model, starting with 1.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        structure: {
+          "@desc": 'The value of this parameter depends upon the context. Used with select structure=x, x can be either the quoted keyword "none", "turn", "sheet", "helix", "dna", "rna", or "carbohydrate" or a respective number 0-6. In the context {*}.structure, the return value is a number; in the context label %[structure], the return is one of the six keywords.',
+          "@examples": ['structure="helix"', "structure=3"],
+          regex: /none|turn|sheet|helix|dna|rna|carbohydrate|[0-6]/i,
+          map: str9,
+          level: "residue-test",
+          property: "structure"
+        },
+        substructure: {
+          "@desc": 'like structure, the value of this parameter depends upon the context. Used with select substructure=x, x can be either the quoted keyword "none", "turn", "sheet", "helix", "dna", "rna", "carbohydrate", "helix310", "helixalpha", or "helixpi", or the respective number 0-9. In the context {*}.substructure, the return value is a number; in the context label %[substructure], the return is one of the nine keywords.',
+          "@examples": ['substructure = "alphahelix"', "substructure =9"],
+          regex: /none|turn|sheet|helix|dna|rna|carbohydrate|helix310|helixalpha|helixpi|[0-9]/i,
+          map: str9,
+          level: "residue-test",
+          property: "structure"
+        },
+        surfacedistance: {
+          "@desc": "A value related to the distance of an atom to a nominal molecular surface. 0 indicates at the surface. Positive numbers are minimum distances in Angstroms from the given atom to the surface.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        symop: {
+          "@desc": 'the first symmetry operation code that generated this atom by Jmol; an integer starting with 1. See also symmetry, below. This operator is only present if the file contains space group information and the file was loaded using the {i, j, k} option so as to generate symmetry-based atoms. To select only the original atoms prior to application of symmetry, you can either use "SYMOP=n", where n is the symmetry operator corresponding to "x,y,z", or you can specify instead simply "NOT symmetry" the way you might specify "NOT hydrogen". Note that atoms in special positions will have multiple operator matches. These atoms can be selected using the keyword SPECIALPOSITION. The special form select SYMOP=nijk selects a specific translation of atoms from the given crystallographic symmetry operation. Comparators <, <=, >, >=, and != can be used and only apply to the ijk part of the designation. The ijk are relative, not absolute. Thus, symop=2555 selects for atoms that have been transformed by symop=2 but not subjected to any further translation. select symop=1555 is identical to select not symmetry. All other ijk are relative to these selections for 555. If the model was loaded using load "filename.cif" {444 666 1}, where the 1 indicates that all symmetry-generated atoms are to be packed within cell 555 and then translated to fill the other 26 specified cells, then select symop=3555 is nearly the same as select symop=3 and cell=555. (The difference being that cell=555 selects for all atoms that are on any edge of the cell, while symop=3555 does not.) However, the situation is different if instead the model was loaded using load "filename.cif" {444 666 0}, where the 0 indicates that symmetry-generated atoms are to be placed exactly where their symmetry operator would put them (x,-y,z being different then from x, 1-y, z). In that case, select symop=3555 is for all atoms that have been generated using symmetry operation 3 but have not had any additional translations applied to the x,y,z expression found in the CIF file. If, for example, symmetry operation 3 is -x,-y,-z, then load "filename.cif" {444 666 0} will place an atom originally at {1/2, 1/2, 1/2} at positions {-1/2, -1/2, -1/2} (symop=3555) and {-3/2, -3/2, -3/2} (symop=3444) and 24 other sites.',
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        symmetry: {
+          "@desc": 'as "symmetry" or in a label as lower-case "o" gives list of crystallographic symmetry operators generating this atom with lattice designations,such as 3555; upper-case "%O" in a label gives a list without the lattice designations. See also symop, above.',
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        temperature: {
+          "@desc": "yes  yes  temperature factor (B-factor)",
+          "@examples": ["temperature >= 20"],
+          regex: reFloat,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B2.ammp("B_iso_or_equiv")
+        },
+        unitXyz: {
+          "@desc": "unit cell XYZ coordinates",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        uX: {
+          "@desc": "unit cell X coordinate normalized to [0,1)",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        uY: {
+          "@desc": "unit cell Y coordinate normalized to [0,1)",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        uZ: {
+          "@desc": "unit cell Z coordinate normalized to [0,1)",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        valence: {
+          "@desc": "the valence of an atom (sum of bonds, where double bond counts as 2 and triple bond counts as 3",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        vanderwaals: {
+          "@desc": "van der Waals radius",
+          "@examples": ["vanderwaals >2"],
+          regex: reFloat,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B2.acp("vdw")
+        },
+        vectorScale: {
+          "@desc": "vibration vector scale",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        volume: {
+          "@desc": "approximate van der Waals volume for this atom. Note, {*}.volume gives an average; use {*}.volume.sum to get total volume.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        vXyz: {
+          "@desc": "vibration vector, or individual components as %vx %vy %vz. For atoms without vibration vectors, {xx}.vXyz is -1; in a label, %[vxyz] is blank.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        vX: {
+          "@desc": "vibration vector X coordinate; for atoms without vibration vector, {xx}.vX is NaN (same for vY and vZ)",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        vY: {
+          "@desc": "vibration vector Y coordinate",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        vZ: {
+          "@desc": "vibration vector Z coordinate",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        },
+        xyz: {
+          "@desc": "Cartesian XYZ coordinates; select xyz > 1.0 selects atoms more than one Angstrom from the origin.",
+          "@examples": [""],
+          isUnsupported: true,
+          regex: /[0-9\s{}-]+/,
+          map: str9,
+          level: "atom-test"
+        }
+      };
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/jmol/operators.js
+  var B3, operators;
+  var init_operators = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/jmol/operators.js"() {
+      init_monadic_parser();
+      init_helper();
+      init_builder();
+      B3 = MolScriptBuilder;
+      operators = [
+        {
+          "@desc": "Selects atoms that are not included in s1.",
+          "@examples": ["not ARG"],
+          name: "not",
+          type: prefix,
+          rule: MonadicParser.alt(MonadicParser.regex(/NOT/i).skip(MonadicParser.whitespace), MonadicParser.string("!").skip(MonadicParser.optWhitespace)),
+          map: (op2, selection) => invertExpr(selection)
+        },
+        {
+          "@desc": "Selects atoms included in both s1 and s2.",
+          "@examples": ["ASP and .CA"],
+          name: "and",
+          type: binaryLeft,
+          rule: infixOp(/AND|&/i),
+          map: (op2, selection, by) => B3.struct.modifier.intersectBy({ 0: selection, by })
+        },
+        {
+          "@desc": "Selects atoms included in either s1 or s2.",
+          "@examples": ["ASP or GLU"],
+          name: "or",
+          type: binaryLeft,
+          rule: infixOp(/OR|\||,/i),
+          map: (op2, s1, s2) => B3.struct.combinator.merge([s1, s2])
+        }
+      ];
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/jmol/keywords.js
+  function nucleicExpr() {
+    return B4.struct.combinator.merge([
+      B4.struct.generator.atomGroups({
+        "residue-test": B4.core.set.has([
+          B4.set(...ResDict.nucleic),
+          B4.ammp("label_comp_id")
+        ])
+      }),
+      B4.struct.filter.pick({
+        0: B4.struct.generator.atomGroups({
+          "group-by": B4.ammp("residueKey")
+        }),
+        test: B4.core.logic.and([
+          B4.core.rel.eq([B4.struct.atomSet.atomCount(), 1]),
+          B4.core.rel.eq([B4.ammp("label_atom_id"), B4.atomName("P")])
+        ])
+      }),
+      B4.struct.filter.pick({
+        0: B4.struct.generator.atomGroups({
+          "group-by": B4.ammp("residueKey")
+        }),
+        test: B4.core.logic.or([
+          B4.core.set.isSubset([
+            atomNameSet(["C1'", "C2'", "O3'", "C3'", "C4'", "C5'", "O5'"]),
+            B4.ammpSet("label_atom_id")
+          ]),
+          B4.core.set.isSubset([
+            atomNameSet(["C1*", "C2*", "O3*", "C3*", "C4*", "C5*", "O5*"]),
+            B4.ammpSet("label_atom_id")
+          ])
+        ])
+      })
+    ]);
+  }
+  function proteinExpr() {
+    return B4.struct.generator.atomGroups({
+      "residue-test": B4.core.set.has([
+        B4.set(...ResDict.amino),
+        B4.ammp("label_comp_id")
+      ])
+    });
+  }
+  function backboneExpr() {
+    return B4.struct.combinator.merge([
+      B4.struct.modifier.intersectBy({
+        0: B4.struct.generator.atomGroups({
+          "residue-test": B4.core.set.has([
+            B4.core.type.set(ResDict.amino),
+            B4.ammp("label_comp_id")
+          ])
+        }),
+        by: B4.struct.generator.atomGroups({
+          "atom-test": B4.core.set.has([
+            B4.core.type.set(Backbone.protein),
+            B4.ammp("label_atom_id")
+          ])
+        })
+      }),
+      B4.struct.modifier.intersectBy({
+        0: B4.struct.generator.atomGroups({
+          "residue-test": B4.core.set.has([
+            B4.core.type.set(ResDict.nucleic),
+            B4.ammp("label_comp_id")
+          ])
+        }),
+        by: B4.struct.generator.atomGroups({
+          "atom-test": B4.core.set.has([
+            B4.core.type.set(Backbone.nucleic),
+            B4.ammp("label_atom_id")
+          ])
+        })
+      })
+    ]);
+  }
+  var B4, ResDict, Backbone, keywords;
+  var init_keywords = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/jmol/keywords.js"() {
+      init_builder();
+      init_helper();
+      B4 = MolScriptBuilder;
+      ResDict = {
+        acidic: ["ASP", "GLU"],
+        aliphatic: ["ALA", "GLY", "ILE", "LEU", "VAL"],
+        amino: ["ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE", "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL", "ASX", "GLX", "UNK"],
+        aromatic: ["HIS", "PHE", "TRP", "TYR"],
+        basic: ["ARG", "HIS", "LYS"],
+        buried: ["ALA", "CYS", "ILE", "LEU", "MET", "PHE", "TRP", "VAL"],
+        cg: ["CYT", "C", "GUA", "G"],
+        cyclic: ["HIS", "PHE", "PRO", "TRP", "TYR"],
+        hydrophobic: ["ALA", "GLY", "ILE", "LEU", "MET", "PHE", "PRO", "TRP", "TYR", "VAL"],
+        large: ["ARG", "GLU", "GLN", "HIS", "ILE", "LEU", "LYS", "MET", "PHE", "TRP", "TYR"],
+        medium: ["ASN", "ASP", "CYS", "PRO", "THR", "VAL"],
+        small: ["ALA", "GLY", "SER"],
+        nucleic: ["G", "C", "A", "T", "U", "I", "DG", "DC", "DA", "DT", "DU", "DI", "+G", "+C", "+A", "+T", "+U", "+I"]
+      };
+      Backbone = {
+        nucleic: [
+          "P",
+          "O3'",
+          "O5'",
+          "C5'",
+          "C4'",
+          "C3'",
+          "OP1",
+          "OP2",
+          "O3*",
+          "O5*",
+          "C5*",
+          "C4*",
+          "C3*",
+          "C2'",
+          "C1'",
+          "O4'",
+          "O2'"
+        ],
+        protein: ["C", "N", "CA"]
+      };
+      keywords = {
+        // general terms
+        all: {
+          "@desc": "all atoms; same as *",
+          abbr: ["*"],
+          map: () => B4.struct.generator.all()
+        },
+        bonded: {
+          "@desc": "covalently bonded",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.rel.gr([B4.struct.atomProperty.core.bondCount({
+              flags: B4.struct.type.bondFlags(["covalent", "metallic", "sulfide"])
+            }), 0])
+          })
+        },
+        clickable: {
+          "@desc": "actually visible -- having some visible aspect such as wireframe, spacefill, or a label showing, or the alpha-carbon or phosphorus atom in a biomolecule that is rendered with only cartoon, rocket, or other biomolecule-specific shape."
+        },
+        connected: {
+          "@desc": "bonded in any way, including hydrogen bonds",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.rel.gr([B4.struct.atomProperty.core.bondCount({
+              flags: B4.struct.type.bondFlags()
+            }), 0])
+          })
+        },
+        displayed: {
+          "@desc": "displayed using the display or hide command; not necessarily visible"
+        },
+        hidden: {
+          "@desc": "hidden using the display or hide command"
+        },
+        none: {
+          "@desc": "no atoms",
+          map: () => B4.struct.generator.empty()
+        },
+        selected: {
+          "@desc": "atoms that have been selected; defaults to all when a file is first loaded"
+        },
+        thisModel: {
+          "@desc": 'atoms in the current frame set, as defined by frame, model, or animation commands. If more than one model is in this set, "thisModel" refers to all of them, regardless of atom displayed/hidden status.'
+        },
+        visible: {
+          "@desc": "visible in any way, including PDB residue atoms for which a cartoon or other such rendering makes their group visible, even if they themselves are not visible."
+        },
+        subset: {
+          "@desc": "the currently defined subset. Note that if a subset is currently defined, then select/display all is the same as select/display subset, restrict none is the same as restrict not subset. In addition, select not subset selects nothing."
+        },
+        specialPosition: {
+          "@desc": "atoms in crystal structures that are at special positions - that is, for which there is more than one operator that leads to them."
+        },
+        unitcell: {
+          "@desc": "atoms within the current unitcell, which may be offset. This includes atoms on the faces and at the vertices of the unitcell."
+        },
+        polyhedra: {
+          "@desc": "all central atoms for which polyhedra have been created. See also polyhera(n), below. (Jmol 14.4)"
+        },
+        nonmetal: {
+          "@desc": "_H,_He,_B,_C,_N,_O,_F,_Ne,_Si,_P,_S,_Cl,_Ar,_As,_Se,_Br,_Kr,_Te,_I,_Xe,_At,_Rn",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.set.has([
+              B4.set(...["H", "He", "B", "C", "N", "O", "F", "Ne", "Si", "P", "S", "Cl", "Ar", "As", "Se", "Br", "Kr", "Te", "I", "Xe", "At", "Rn"].map(B4.es)),
+              B4.acp("elementSymbol")
+            ])
+          })
+        },
+        metal: {
+          "@desc": "!nonmetal",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.logic.not([
+              B4.core.set.has([
+                B4.set(...["H", "He", "B", "C", "N", "O", "F", "Ne", "Si", "P", "S", "Cl", "Ar", "As", "Se", "Br", "Kr", "Te", "I", "Xe", "At", "Rn"].map(B4.es)),
+                B4.acp("elementSymbol")
+              ])
+            ])
+          })
+        },
+        alkaliMetal: {
+          "@desc": "_Li,_Na,_K,_Rb,_Cs,_Fr",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.set.has([
+              B4.set(...["Li", "Na", "K", "Rb", "Cs", "Fr"].map(B4.es)),
+              B4.acp("elementSymbol")
+            ])
+          })
+        },
+        alkalineEarth: {
+          "@desc": "_Be,_Mg,_Ca,_Sr,_Ba,_Ra",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.set.has([
+              B4.set(...["Be", "Mg", "Ca", "Sr", "Ba", "Ra"].map(B4.es)),
+              B4.acp("elementSymbol")
+            ])
+          })
+        },
+        nobleGas: {
+          "@desc": "_He,_Ne,_Ar,_Kr,_Xe,_Rn",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.set.has([
+              B4.set(...["He", "Ne", "Ar", "Kr", "Xe", "Rn"].map(B4.es)),
+              B4.acp("elementSymbol")
+            ])
+          })
+        },
+        metalloid: {
+          "@desc": "_B,_Si,_Ge,_As,_Sb,_Te",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.set.has([
+              B4.set(...["B", "Si", "Ge", "As", "Sb", "Te"].map(B4.es)),
+              B4.acp("elementSymbol")
+            ])
+          })
+        },
+        transitionMetal: {
+          "@desc": "(includes La and Ac) elemno>=21 and elemno<=30, elemno=57, elemno=89, elemno>=39 and elemno<=48, elemno>=72 and elemno<=80, elemno>=104 and elemno<=112",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.logic.or([
+              B4.core.rel.inRange([B4.acp("atomicNumber"), 21, 30]),
+              B4.core.rel.inRange([B4.acp("atomicNumber"), 39, 48]),
+              B4.core.rel.inRange([B4.acp("atomicNumber"), 72, 80]),
+              B4.core.rel.inRange([B4.acp("atomicNumber"), 104, 112]),
+              B4.core.set.has([B4.set(57, 89), B4.acp("atomicNumber")])
+            ])
+          })
+        },
+        lanthanide: {
+          "@desc": "(does not include La) elemno>57 and elemno<=71",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.rel.inRange([B4.acp("atomicNumber"), 57, 71])
+          })
+        },
+        actinide: {
+          "@desc": "(does not include Ac) elemno>89 and elemno<=103",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.rel.inRange([B4.acp("atomicNumber"), 89, 103])
+          })
+        },
+        isaromatic: {
+          "@desc": "atoms connected with the AROMATIC, AROMATICSINGLE, or AROMATICDOUBLE bond types",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.rel.gr([
+              B4.struct.atomProperty.core.bondCount({
+                flags: B4.struct.type.bondFlags(["aromatic"])
+              }),
+              0
+            ])
+          })
+        },
+        carbohydrate: {
+          "@desc": ""
+        },
+        ions: {
+          "@desc": '(specifically the PDB designations "PO4" and "SO4")'
+        },
+        ligand: {
+          "@desc": '(originally "hetero and not solvent"; changed to "!(protein,nucleic,water,UREA)" for Jmol 12.2)'
+        },
+        nucleic: {
+          "@desc": `any group that (a) has one of the following group names: G, C, A, T, U, I, DG, DC, DA, DT, DU, DI, +G, +C, +A, +T, +U, +I; or (b) can be identified as a group that is only one atom, with name "P"; or (c) has all of the following atoms (prime, ', can replace * here): C1*, C2*, C3*, O3*, C4*, C5*, and O5*.`,
+          map: () => nucleicExpr()
+        },
+        purine: {
+          "@desc": "any nucleic group that (a) has one of the following group names: A, G, I, DA, DG, DI, +A, +G, or +I; or (b) also has atoms N7, C8, and N9.",
+          map: () => B4.struct.modifier.intersectBy({
+            0: nucleicExpr(),
+            by: B4.struct.combinator.merge([
+              B4.struct.generator.atomGroups({
+                "residue-test": B4.core.set.has([
+                  B4.set(...["A", "G", "I", "DA", "DG", "DI", "+A", "+G", "+I"]),
+                  B4.ammp("label_comp_id")
+                ])
+              }),
+              B4.struct.filter.pick({
+                0: B4.struct.generator.atomGroups({
+                  "group-by": B4.ammp("residueKey")
+                }),
+                test: B4.core.set.isSubset([
+                  atomNameSet(["N7", "C8", "N9"]),
+                  B4.ammpSet("label_atom_id")
+                ])
+              })
+            ])
+          })
+        },
+        pyrimidine: {
+          "@desc": "any nucleic group that (a) has one of the following group names: C, T, U, DC, DT, DU, +C, +T, +U; or (b) also has atom O2.",
+          map: () => B4.struct.modifier.intersectBy({
+            0: nucleicExpr(),
+            by: B4.struct.combinator.merge([
+              B4.struct.generator.atomGroups({
+                "residue-test": B4.core.set.has([
+                  B4.set(...["C", "T", "U", "DC", "DT", "DU", "+C", "+T", "+U"]),
+                  B4.ammp("label_comp_id")
+                ])
+              }),
+              B4.struct.filter.pick({
+                0: B4.struct.generator.atomGroups({
+                  "group-by": B4.ammp("residueKey")
+                }),
+                test: B4.core.logic.or([
+                  B4.core.set.has([
+                    B4.ammpSet("label_atom_id"),
+                    B4.atomName("O2*")
+                  ]),
+                  B4.core.set.has([
+                    B4.ammpSet("label_atom_id"),
+                    B4.atomName("O2'")
+                  ])
+                ])
+              })
+            ])
+          })
+        },
+        dna: {
+          "@desc": "any nucleic group that (a) has one of the following group names: DG, DC, DA, DT, DU, DI, T, +G, +C, +A, +T; or (b) has neither atom O2* or O2'.",
+          map: () => B4.struct.modifier.intersectBy({
+            0: nucleicExpr(),
+            by: B4.struct.combinator.merge([
+              B4.struct.generator.atomGroups({
+                "residue-test": B4.core.set.has([
+                  B4.set(...["DG", "DC", "DA", "DT", "DU", "DI", "T", "+G", "+C", "+A", "+T"]),
+                  B4.ammp("label_comp_id")
+                ])
+              }),
+              B4.struct.filter.pick({
+                0: B4.struct.generator.atomGroups({
+                  "group-by": B4.ammp("residueKey")
+                }),
+                test: B4.core.logic.not([
+                  B4.core.logic.or([
+                    B4.core.set.has([
+                      B4.ammpSet("label_atom_id"),
+                      B4.atomName("O2*")
+                    ]),
+                    B4.core.set.has([
+                      B4.ammpSet("label_atom_id"),
+                      B4.atomName("O2'")
+                    ])
+                  ])
+                ])
+              })
+            ])
+          })
+        },
+        rna: {
+          "@desc": "any nucleic group that (a) has one of the following group names: G, C, A, U, I, +U, +I; or (b) has atom O2* or O2'.",
+          map: () => B4.struct.modifier.intersectBy({
+            0: nucleicExpr(),
+            by: B4.struct.combinator.merge([
+              B4.struct.generator.atomGroups({
+                "residue-test": B4.core.set.has([
+                  B4.set(...["G", "C", "A", "U", "I", "+U", "+I"]),
+                  B4.ammp("label_comp_id")
+                ])
+              }),
+              B4.struct.filter.pick({
+                0: B4.struct.generator.atomGroups({
+                  "group-by": B4.ammp("residueKey")
+                }),
+                test: B4.core.logic.or([
+                  B4.core.set.has([
+                    B4.ammpSet("label_atom_id"),
+                    B4.atomName("O2*")
+                  ]),
+                  B4.core.set.has([
+                    B4.ammpSet("label_atom_id"),
+                    B4.atomName("O2'")
+                  ])
+                ])
+              })
+            ])
+          })
+        },
+        protein: {
+          "@desc": 'defined as a group that (a) has one of the following group names: ALA, ARG, ASN, ASP, CYS, GLN, GLU, GLY, HIS, ILE, LEU, LYS, MET, PHE, PRO, SER, THR, TRP, TYR, VAL, ASX, GLX, or UNK; or (b) contains PDB atom designations [C, O, CA, and N] bonded correctly; or (c) does not contain "O" but contains [C, CA, and N] bonded correctly; or (d) has only one atom, which has name CA and does not have the group name CA (indicating a calcium atom).',
+          map: () => proteinExpr()
+        },
+        acidic: {
+          "@desc": "ASP GLU",
+          map: () => resnameExpr(ResDict.acidic)
+        },
+        acyclic: {
+          "@desc": "amino and not cyclic",
+          map: () => B4.struct.modifier.intersectBy({
+            0: resnameExpr(ResDict.amino),
+            by: invertExpr(resnameExpr(ResDict.cyclic))
+          })
+        },
+        aliphatic: {
+          "@desc": "ALA GLY ILE LEU VAL",
+          map: () => resnameExpr(ResDict.aliphatic)
+        },
+        amino: {
+          "@desc": "all twenty standard amino acids, plus ASX, GLX, UNK",
+          map: () => resnameExpr(ResDict.amino)
+        },
+        aromatic: {
+          "@desc": 'HIS PHE TRP TYR (see also "isaromatic" for aromatic bonds)',
+          map: () => resnameExpr(ResDict.aromatic)
+        },
+        basic: {
+          "@desc": "ARG HIS LYS",
+          map: () => resnameExpr(ResDict.basic)
+        },
+        buried: {
+          "@desc": "ALA CYS ILE LEU MET PHE TRP VAL",
+          map: () => resnameExpr(ResDict.buried)
+        },
+        charged: {
+          "@desc": "same as acidic or basic -- ASP GLU, ARG HIS LYS",
+          map: () => resnameExpr(ResDict.acidic.concat(ResDict.basic))
+        },
+        cyclic: {
+          "@desc": "HIS PHE PRO TRP TYR",
+          map: () => resnameExpr(ResDict.cyclic)
+        },
+        helix: {
+          "@desc": "secondary structure-related.",
+          map: () => B4.struct.generator.atomGroups({
+            "residue-test": B4.core.flags.hasAny([
+              B4.struct.type.secondaryStructureFlags(["helix"]),
+              B4.ammp("secondaryStructureFlags")
+            ])
+          })
+        },
+        helixalpha: {
+          "@desc": "secondary structure-related.",
+          map: () => B4.struct.generator.atomGroups({
+            "residue-test": B4.core.flags.hasAny([
+              B4.struct.type.secondaryStructureFlags(["alpha"]),
+              B4.ammp("secondaryStructureFlags")
+            ])
+          })
+        },
+        helix310: {
+          "@desc": "secondary structure-related.",
+          map: () => B4.struct.generator.atomGroups({
+            "residue-test": B4.core.flags.hasAny([
+              B4.struct.type.secondaryStructureFlags(["3-10"]),
+              B4.ammp("secondaryStructureFlags")
+            ])
+          })
+        },
+        helixpi: {
+          "@desc": "secondary structure-related.",
+          map: () => B4.struct.generator.atomGroups({
+            "residue-test": B4.core.flags.hasAny([
+              B4.struct.type.secondaryStructureFlags(["pi"]),
+              B4.ammp("secondaryStructureFlags")
+            ])
+          })
+        },
+        hetero: {
+          "@desc": "PDB atoms designated as HETATM",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.ammp("isHet")
+          })
+        },
+        hydrophobic: {
+          "@desc": "ALA GLY ILE LEU MET PHE PRO TRP TYR VAL",
+          map: () => resnameExpr(ResDict.hydrophobic)
+        },
+        large: {
+          "@desc": "ARG GLU GLN HIS ILE LEU LYS MET PHE TRP TYR",
+          map: () => resnameExpr(ResDict.large)
+        },
+        medium: {
+          "@desc": "ASN ASP CYS PRO THR VAL",
+          map: () => resnameExpr(ResDict.medium)
+        },
+        negative: {
+          "@desc": "same as acidic -- ASP GLU",
+          map: () => resnameExpr(ResDict.acidic)
+        },
+        neutral: {
+          "@desc": "amino and not (acidic or basic)",
+          map: () => B4.struct.modifier.intersectBy({
+            0: resnameExpr(ResDict.amino),
+            by: invertExpr(resnameExpr(ResDict.acidic.concat(ResDict.basic)))
+          })
+        },
+        polar: {
+          "@desc": "amino and not hydrophobic",
+          map: () => B4.struct.modifier.intersectBy({
+            0: resnameExpr(ResDict.amino),
+            by: invertExpr(resnameExpr(ResDict.hydrophobic))
+          })
+        },
+        positive: {
+          "@desc": "same as basic -- ARG HIS LYS",
+          map: () => resnameExpr(ResDict.basic)
+        },
+        sheet: {
+          "@desc": "secondary structure-related",
+          map: () => B4.struct.generator.atomGroups({
+            "residue-test": B4.core.flags.hasAny([
+              B4.struct.type.secondaryStructureFlags(["sheet"]),
+              B4.ammp("secondaryStructureFlags")
+            ])
+          })
+        },
+        small: {
+          "@desc": "ALA GLY SER",
+          map: () => resnameExpr(ResDict.small)
+        },
+        surface: {
+          "@desc": "amino and not buried",
+          map: () => B4.struct.modifier.intersectBy({
+            0: resnameExpr(ResDict.amino),
+            by: invertExpr(resnameExpr(ResDict.buried))
+          })
+        },
+        turn: {
+          "@desc": "secondary structure-related",
+          map: () => B4.struct.generator.atomGroups({
+            "residue-test": B4.core.flags.hasAny([
+              B4.struct.type.secondaryStructureFlags(["turn"]),
+              B4.ammp("secondaryStructureFlags")
+            ])
+          })
+        },
+        alpha: {
+          "@desc": "(*.CA)",
+          map: () => B4.struct.generator.atomGroups({
+            "atom-test": B4.core.rel.eq([
+              B4.atomName("CA"),
+              B4.ammp("label_atom_id")
+            ])
+          })
+        },
+        base: {
+          "@desc": "(nucleic bases)"
+        },
+        backbone: {
+          "@desc": "(*.C, *.CA, *.N, and all nucleic other than the bases themselves)",
+          abbr: ["mainchain"],
+          map: () => backboneExpr()
+        },
+        sidechain: {
+          "@desc": "((protein or nucleic) and not backbone)"
+        },
+        spine: {
+          "@desc": "(*.CA, *.N, *.C for proteins; *.P, *.O3', *.O5', *.C3', *.C4', *.C5 for nucleic acids)"
+        },
+        leadatom: {
+          "@desc": "(*.CA, *.P, and terminal *.O5')"
+        },
+        solvent: {
+          "@desc": 'PDB "HOH", water, also the connected set of H-O-H in any model'
+        }
+      };
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/jmol/parser.js
+  function atomExpressionQuery(x) {
+    const [resname, resnoRange, resno, inscode, chainname, atomname, altloc] = x[1];
+    const tests = {};
+    if (chainname) {
+      tests["chain-test"] = B5.core.rel.eq([B5.ammp("auth_asym_id"), chainname]);
+    }
+    const resProps = [];
+    if (resname)
+      resProps.push(B5.core.rel.eq([B5.ammp("label_comp_id"), resname]));
+    if (resnoRange)
+      resProps.push(B5.core.logic.and([
+        B5.core.rel.gre([B5.ammp("auth_seq_id"), resnoRange[0]]),
+        B5.core.rel.lte([B5.ammp("auth_seq_id"), resnoRange[1]])
+      ]));
+    if (resno)
+      resProps.push(B5.core.rel.eq([B5.ammp("auth_seq_id"), resno]));
+    if (inscode)
+      resProps.push(B5.core.rel.eq([B5.ammp("pdbx_PDB_ins_code"), inscode]));
+    if (resProps.length)
+      tests["residue-test"] = andExpr(resProps);
+    const atomProps = [];
+    if (atomname)
+      atomProps.push(B5.core.rel.eq([B5.ammp("auth_atom_id"), atomname]));
+    if (altloc)
+      atomProps.push(B5.core.rel.eq([B5.ammp("label_alt_id"), altloc]));
+    if (atomProps.length)
+      tests["atom-test"] = andExpr(atomProps);
+    return B5.struct.generator.atomGroups(tests);
+  }
+  var B5, valueOperators, lang, transpiler;
+  var init_parser5 = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/jmol/parser.js"() {
+      init_monadic_parser();
+      init_helper();
+      init_builder();
+      init_properties3();
+      init_operators();
+      init_keywords();
+      B5 = MolScriptBuilder;
+      valueOperators = [
+        {
+          "@desc": "value comparisons",
+          "@examples": [],
+          name: "=",
+          abbr: ["=="],
+          type: binaryLeft,
+          rule: MonadicParser.regexp(/\s*(LIKE|>=|<=|=|!=|>|<)\s*/i, 1),
+          map: (op2, e1, e2) => {
+            let expr;
+            if (e1 === "structure") {
+              expr = B5.core.flags.hasAny([B5.ammp("secondaryStructureFlags"), structureMap(e2)]);
+            } else if (e2 === "structure") {
+              expr = B5.core.flags.hasAny([B5.ammp("secondaryStructureFlags"), structureMap(e1)]);
+            } else if (e1.head !== void 0) {
+              if (e1.head.name === "core.type.regex") {
+                expr = B5.core.str.match([e1, B5.core.type.str([e2])]);
+              }
+            } else if (e2.head !== void 0) {
+              if (e2.head.name === "core.type.regex") {
+                expr = B5.core.str.match([e2, B5.core.type.str([e1])]);
+              }
+            } else if (op2.toUpperCase() === "LIKE") {
+              if (e1.head) {
+                expr = B5.core.str.match([
+                  B5.core.type.regex([`^${e2}$`, "i"]),
+                  B5.core.type.str([e1])
+                ]);
+              } else {
+                expr = B5.core.str.match([
+                  B5.core.type.regex([`^${e1}$`, "i"]),
+                  B5.core.type.str([e2])
+                ]);
+              }
+            }
+            if (!expr) {
+              if (e1.head)
+                e2 = wrapValue(e1, e2);
+              if (e2.head)
+                e1 = wrapValue(e2, e1);
+              switch (op2) {
+                case "=":
+                  expr = B5.core.rel.eq([e1, e2]);
+                  break;
+                case "!=":
+                  expr = B5.core.rel.neq([e1, e2]);
+                  break;
+                case ">":
+                  expr = B5.core.rel.gr([e1, e2]);
+                  break;
+                case "<":
+                  expr = B5.core.rel.lt([e1, e2]);
+                  break;
+                case ">=":
+                  expr = B5.core.rel.gre([e1, e2]);
+                  break;
+                case "<=":
+                  expr = B5.core.rel.lte([e1, e2]);
+                  break;
+                default:
+                  throw new Error(`value operator '${op2}' not supported`);
+              }
+            }
+            return B5.struct.generator.atomGroups({ "atom-test": expr });
+          }
+        }
+      ];
+      lang = MonadicParser.createLanguage({
+        Integer: () => MonadicParser.regexp(/-?[0-9]+/).map(Number).desc("integer"),
+        Parens: function(r) {
+          return MonadicParser.alt(r.Parens, r.Operator, r.Expression).wrap(MonadicParser.regexp(/\(\s*/), MonadicParser.regexp(/\s*\)/));
+        },
+        Expression: function(r) {
+          return MonadicParser.alt(r.Keywords, r.AtomExpression.map(atomExpressionQuery), r.Within.map((x) => B5.struct.modifier.includeSurroundings({ 0: x[1], radius: x[0] })), r.ValueQuery, r.Element.map((x) => B5.struct.generator.atomGroups({
+            "atom-test": B5.core.rel.eq([B5.acp("elementSymbol"), B5.struct.type.elementSymbol(x)])
+          })), r.Resname.map((x) => B5.struct.generator.atomGroups({
+            "residue-test": B5.core.rel.eq([B5.ammp("label_comp_id"), x])
+          })));
+        },
+        Operator: function(r) {
+          return combineOperators(operators, MonadicParser.alt(r.Parens, r.Expression));
+        },
+        AtomExpression: function(r) {
+          return MonadicParser.seq(MonadicParser.lookahead(r.AtomPrefix), MonadicParser.seq(r.BracketedResname.or(MonadicParser.of(null)), r.ResnoRange.or(MonadicParser.of(null)), r.Resno.or(MonadicParser.of(null)), r.Inscode.or(MonadicParser.of(null)), r.Chainname.or(MonadicParser.of(null)), r.Atomname.or(MonadicParser.of(null)), r.Altloc.or(MonadicParser.of(null)), r.Model.or(MonadicParser.of(null)))).desc("expression");
+        },
+        AtomPrefix: () => MonadicParser.regexp(/[\[0-9:^%/.-]/).desc("atom-prefix"),
+        Chainname: () => MonadicParser.regexp(/:([A-Za-z]{1,3})/, 1).desc("chainname"),
+        Model: () => MonadicParser.regexp(/\/([0-9]+)/, 1).map(Number).desc("model"),
+        Element: () => MonadicParser.regexp(/_([A-Za-z]{1,3})/, 1).desc("element"),
+        Atomname: () => MonadicParser.regexp(/\.([a-zA-Z0-9]{1,4})/, 1).map(B5.atomName).desc("atomname"),
+        Resname: () => MonadicParser.regexp(/[a-zA-Z0-9]{1,4}/).desc("resname"),
+        Resno: (r) => r.Integer.desc("resno"),
+        Altloc: () => MonadicParser.regexp(/%([a-zA-Z0-9])/, 1).desc("altloc"),
+        Inscode: () => MonadicParser.regexp(/\^([a-zA-Z0-9])/, 1).desc("inscode"),
+        BracketedResname: () => MonadicParser.regexp(/\[([a-zA-Z0-9]{1,4})\]/, 1).desc("bracketed-resname"),
+        ResnoRange: (r) => {
+          return MonadicParser.seq(r.Integer.skip(MonadicParser.seq(MonadicParser.optWhitespace, MonadicParser.string("-"), MonadicParser.optWhitespace)), r.Integer).desc("resno-range");
+        },
+        Within: (r) => {
+          return MonadicParser.regexp(/within/i).skip(MonadicParser.regexp(/\s*\(\s*/)).then(MonadicParser.seq(r.Integer.skip(MonadicParser.regexp(/\s*,\s*/)), r.Query)).skip(MonadicParser.regexp(/\)/));
+        },
+        Keywords: () => MonadicParser.alt(...getKeywordRules(keywords)).desc("keyword"),
+        Query: function(r) {
+          return MonadicParser.alt(r.Operator, r.Parens, r.Expression).trim(MonadicParser.optWhitespace);
+        },
+        Number: function() {
+          return MonadicParser.regexp(/-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?/).map(Number).desc("number");
+        },
+        String: function() {
+          const w = getReservedWords(properties, keywords, operators).sort(strLenSortFn).map(escapeRegExp).join("|");
+          return MonadicParser.alt(MonadicParser.regexp(new RegExp(`(?!(${w}))[A-Z0-9_]+`, "i")), MonadicParser.regexp(/'((?:[^"\\]|\\.)*)'/, 1), MonadicParser.regexp(/"((?:[^"\\]|\\.)*)"/, 1).map((x) => B5.core.type.regex([`^${x}$`, "i"]))).desc("string");
+        },
+        Value: function(r) {
+          return MonadicParser.alt(r.Number, r.String);
+        },
+        ValueParens: function(r) {
+          return MonadicParser.alt(r.ValueParens, r.ValueOperator, r.ValueExpressions).wrap(MonadicParser.string("("), MonadicParser.string(")"));
+        },
+        ValuePropertyNames: function() {
+          return MonadicParser.alt(...getPropertyNameRules(properties, /LIKE|>=|<=|=|!=|>|<|\)|\s/i));
+        },
+        ValueOperator: function(r) {
+          return combineOperators(valueOperators, MonadicParser.alt(r.ValueParens, r.ValueExpressions));
+        },
+        ValueExpressions: function(r) {
+          return MonadicParser.alt(r.Value, r.ValuePropertyNames);
+        },
+        ValueQuery: function(r) {
+          return MonadicParser.alt(r.ValueOperator.map((x) => {
+            if (x.head) {
+              if (x.head.name.startsWith("structure-query.generator"))
+                return x;
+            } else {
+              if (typeof x === "string" && x.length <= 4) {
+                return B5.struct.generator.atomGroups({
+                  "residue-test": B5.core.rel.eq([B5.ammp("label_comp_id"), x])
+                });
+              }
+            }
+            throw new Error(`values must be part of an comparison, value '${x}'`);
+          }));
+        }
+      });
+      transpiler = (str11) => lang.Query.tryParse(str11);
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/pymol/properties.js
+  function atomNameListMap(x) {
+    return x.split("+").map(B6.atomName);
+  }
+  function listMap(x) {
+    return x.split("+").map((x2) => x2.replace(/^["']|["']$/g, ""));
+  }
+  function listOrRangeMap(x) {
+    if (x.includes("-") && x.includes("+")) {
+      const pSplit = x.split("+").map((x2) => x2.replace(/^["']|["']$/g, ""));
+      const res = [];
+      pSplit.forEach((x2) => {
+        if (x2.includes("-") && !x2.startsWith("-")) {
+          const [min5, max5] = x2.split("-").map((x3) => parseInt(x3));
+          for (let i = min5; i <= max5; i++) {
+            res.push(i);
+          }
+        } else if (x2.includes("-") && x2.startsWith("-") && x2.match(/[0-9]+-[-0-9]+/)) {
+          const min5 = -parseInt(x2.split("-")[1]);
+          let max5;
+          if (x2.includes("--")) {
+            max5 = -parseInt(x2.split("-")[3]);
+          } else {
+            max5 = parseInt(x2.split("-")[2]);
+          }
+          for (let i = min5; i <= max5; i++) {
+            res.push(i);
+          }
+        } else if (x2.includes("-") && x2.startsWith("-") && !x2.match(/[0-9]+-[-0-9]+/)) {
+          res.push(parseInt(x2));
+        } else {
+          res.push(parseInt(x2));
+        }
+      });
+      return res;
+    } else if (x.includes("-") && !x.includes("+")) {
+      const res = [];
+      if (!x.startsWith("-")) {
+        const [min5, max5] = x.split("-").map((x2) => parseInt(x2));
+        for (let i = min5; i <= max5; i++) {
+          res.push(i);
+        }
+      } else if (x.startsWith("-") && x.match(/[0-9]+-[-0-9]+/)) {
+        const min5 = -parseInt(x.split("-")[1]);
+        let max5;
+        if (x.includes("--")) {
+          max5 = -parseInt(x.split("-")[3]);
+        } else {
+          max5 = parseInt(x.split("-")[2]);
+        }
+        for (let i = min5; i <= max5; i++) {
+          res.push(i);
+        }
+      } else if (x.startsWith("-") && !x.match(/[0-9]+-[-0-9]+/)) {
+        res.push(parseInt(x));
+      } else {
+        res.push(parseInt(x));
+      }
+      return res;
+    } else if (!x.includes("-") && x.includes("+")) {
+      return listMap(x).map((x2) => parseInt(x2));
+    } else {
+      return [parseInt(x)];
+    }
+  }
+  function elementListMap(x) {
+    return x.split("+").map(B6.struct.type.elementSymbol);
+  }
+  function sstrucListMap(x) {
+    return {
+      flags: B6.struct.type.secondaryStructureFlags(x.toUpperCase().split("+").map((ss) => sstrucDict[ss] || "none"))
+    };
+  }
+  var B6, reFloat2, sstrucDict, properties2;
+  var init_properties4 = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/pymol/properties.js"() {
+      init_builder();
+      B6 = MolScriptBuilder;
+      reFloat2 = /[-+]?[0-9]*\.?[0-9]+/;
+      sstrucDict = {
+        H: "helix",
+        S: "beta",
+        L: "none"
+      };
+      properties2 = {
+        symbol: {
+          "@desc": "chemical-symbol-list: list of 1- or 2-letter chemical symbols from the periodic table",
+          "@examples": ["symbol O+N"],
+          abbr: ["e."],
+          regex: /[a-zA-Z'"+]+/,
+          map: elementListMap,
+          level: "atom-test",
+          property: B6.acp("elementSymbol")
+        },
+        name: {
+          "@desc": "atom-name-list: list of up to 4-letter codes for atoms in proteins or nucleic acids",
+          "@examples": ["name CA+CB+CG+CD"],
+          abbr: ["n."],
+          regex: /[a-zA-Z0-9'"+]+/,
+          map: atomNameListMap,
+          level: "atom-test",
+          property: B6.ammp("label_atom_id")
+        },
+        resn: {
+          "@desc": "residue-name-list: list of 3-letter codes for amino acids or list of up to 2-letter codes for nucleic acids",
+          "@examples": ["resn ASP+GLU+ASN+GLN", "resn A+G"],
+          abbr: ["resname", "r."],
+          regex: /[a-zA-Z0-9'"+]+/,
+          map: listMap,
+          level: "residue-test",
+          property: B6.ammp("label_comp_id")
+        },
+        resi: {
+          "@desc": "residue-identifier-list list of up to 4-digit residue numbers or residue-identifier-range",
+          "@examples": ["resi 1+10+100+1000", "resi 1-10"],
+          abbr: ["resident", "residue", "resid", "i."],
+          regex: /[0-9+-]+/,
+          map: listOrRangeMap,
+          level: "residue-test",
+          property: B6.ammp("auth_seq_id")
+        },
+        alt: {
+          "@desc": "alternate-conformation-identifier-list list of single letters",
+          "@examples": ["alt A+B", 'alt ""', 'alt ""+A'],
+          abbr: [],
+          regex: /[a-zA-Z0-9'"+]+/,
+          map: listMap,
+          level: "atom-test",
+          property: B6.ammp("label_alt_id")
+        },
+        chain: {
+          "@desc": "chain-identifier-list list of single letters or sometimes numbers",
+          "@examples": ["chain A"],
+          abbr: ["c."],
+          regex: /[a-zA-Z0-9'"+]+/,
+          map: listMap,
+          level: "chain-test",
+          property: B6.ammp("auth_asym_id")
+        },
+        segi: {
+          "@desc": "segment-identifier-list list of up to 4 letter identifiers",
+          "@examples": ["segi lig"],
+          abbr: ["segid", "s."],
+          regex: /[a-zA-Z0-9'"+]+/,
+          map: listMap,
+          level: "chain-test",
+          property: B6.ammp("label_asym_id")
+        },
+        flag: {
+          "@desc": "flag-number a single integer from 0 to 31",
+          "@examples": ["flag 0"],
+          isUnsupported: true,
+          abbr: ["f."],
+          regex: /[0-9]+/,
+          map: (x) => parseInt(x),
+          level: "atom-test"
+        },
+        numeric_type: {
+          "@desc": "type-number a single integer",
+          "@examples": ["nt. 5"],
+          isUnsupported: true,
+          abbr: ["nt."],
+          regex: /[0-9]+/,
+          map: (x) => parseInt(x),
+          level: "atom-test"
+        },
+        text_type: {
+          "@desc": "type-string a list of up to 4 letter codes",
+          "@examples": ["text_type HA+HC"],
+          isUnsupported: true,
+          abbr: ["tt."],
+          regex: /[a-zA-Z0-9'"+]+/,
+          map: listMap,
+          level: "atom-test"
+        },
+        id: {
+          "@desc": "external-index-number a single integer",
+          "@examples": ["id 23"],
+          regex: /[0-9+-]+/,
+          map: listOrRangeMap,
+          level: "atom-test",
+          property: B6.ammp("id")
+        },
+        index: {
+          "@desc": "internal-index-number a single integer",
+          "@examples": ["index 11"],
+          regex: /[0-9+-]+/,
+          map: listOrRangeMap,
+          level: "atom-test",
+          property: B6.ammp("id")
+        },
+        ss: {
+          "@desc": "secondary-structure-type list of single letters. Helical regions should be assigned H and sheet regions S. Loop regions can either be assigned L or be blank.",
+          "@examples": ["ss H+S+L", 'ss S+""'],
+          abbr: [],
+          regex: /[a-zA-Z'"+]+/,
+          map: sstrucListMap,
+          level: "residue-test",
+          property: B6.ammp("secondaryStructureFlags")
+        },
+        b: {
+          "@desc": "comparison-operator b-factor-value a real number",
+          "@examples": ["b > 10"],
+          isNumeric: true,
+          abbr: [],
+          regex: reFloat2,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B6.ammp("B_iso_or_equiv")
+        },
+        q: {
+          "@desc": "comparison-operator occupancy-value a real number",
+          "@examples": ["q <0.50"],
+          isNumeric: true,
+          abbr: [],
+          regex: reFloat2,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B6.ammp("occupancy")
+        },
+        formal_charge: {
+          "@desc": "comparison-operator formal charge-value an integer",
+          "@examples": ["fc. = -1"],
+          isNumeric: true,
+          abbr: ["fc."],
+          regex: reFloat2,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B6.ammp("pdbx_formal_charge")
+        },
+        partial_charge: {
+          "@desc": "comparison-operator partial charge-value a real number",
+          "@examples": ["pc. > 1"],
+          isUnsupported: true,
+          isNumeric: true,
+          abbr: ["pc."],
+          regex: reFloat2,
+          map: (x) => parseFloat(x),
+          level: "atom-test"
+        },
+        elem: {
+          "@desc": 'str  atomic element symbol string ("X" if undefined)',
+          "@examples": ["elem N"],
+          regex: /[a-zA-Z0-9]{1,3}/,
+          map: (x) => B6.es(x),
+          level: "atom-test",
+          property: B6.acp("elementSymbol")
+        }
+      };
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/pymol/operators.js
+  var B7, operators2;
+  var init_operators2 = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/pymol/operators.js"() {
+      init_monadic_parser();
+      init_helper();
+      init_builder();
+      B7 = MolScriptBuilder;
+      operators2 = [
+        {
+          "@desc": "Selects atoms that are not included in s1.",
+          "@examples": [
+            "NOT resn ALA",
+            "not (resi 42 or chain A)",
+            "!resi 42 or chain A"
+          ],
+          name: "not",
+          type: prefix,
+          rule: MonadicParser.alt(MonadicParser.regexp(/NOT/i).skip(MonadicParser.whitespace), MonadicParser.string("!").skip(MonadicParser.optWhitespace)),
+          map: (op2, selection) => invertExpr(selection)
+        },
+        {
+          "@desc": "Selects atoms included in both s1 and s2.",
+          "@examples": ["chain A AND name CA"],
+          name: "and",
+          type: binaryLeft,
+          rule: infixOp(/AND|&/i),
+          map: (op2, selection, by) => B7.struct.modifier.intersectBy({ 0: selection, by })
+        },
+        {
+          "@desc": "Selects atoms included in either s1 or s2.",
+          "@examples": ["chain A OR chain B"],
+          name: "or",
+          type: binaryLeft,
+          rule: infixOp(/OR|\|/i),
+          map: (op2, s1, s2) => B7.struct.combinator.merge([s1, s2])
+        },
+        {
+          "@desc": "Selects atoms in s1 whose identifiers name, resi, resn, chain and segi all match atoms in s2.",
+          "@examples": ["chain A IN chain B"],
+          name: "in",
+          type: binaryLeft,
+          rule: infixOp(/IN/i),
+          map: (op2, selection, source) => {
+            return B7.struct.filter.withSameAtomProperties({
+              0: selection,
+              source,
+              property: B7.core.type.compositeKey([
+                B7.ammp("label_atom_id"),
+                B7.ammp("label_seq_id"),
+                B7.ammp("label_comp_id"),
+                B7.ammp("auth_asym_id"),
+                B7.ammp("label_asym_id")
+              ])
+            });
+          }
+        },
+        {
+          "@desc": "Selects atoms in s1 whose identifiers name and resi match atoms in s2.",
+          "@examples": ["chain A LIKE chain B"],
+          name: "like",
+          type: binaryLeft,
+          rule: infixOp(/LIKE|l\./i),
+          map: (op2, selection, source) => {
+            return B7.struct.filter.withSameAtomProperties({
+              0: selection,
+              source,
+              property: B7.core.type.compositeKey([
+                B7.ammp("label_atom_id"),
+                B7.ammp("label_seq_id")
+              ])
+            });
+          }
+        },
+        {
+          "@desc": "Selects all atoms whose van der Waals radii are separated from the van der Waals radii of s1 by a minimum of X Angstroms.",
+          "@examples": ["solvent GAP 2"],
+          name: "gap",
+          type: postfix,
+          rule: postfixOp(/GAP\s+([-+]?[0-9]*\.?[0-9]+)/i, 1).map((x) => parseFloat(x)),
+          map: (distance, target) => {
+            return B7.struct.filter.within({
+              "0": B7.struct.generator.all(),
+              target,
+              "atom-radius": B7.acp("vdw"),
+              "max-radius": distance,
+              invert: true
+            });
+          }
+        },
+        {
+          "@desc": "Selects atoms with centers within X Angstroms of the center of any atom in s1.",
+          "@examples": ["resname LIG AROUND 1"],
+          name: "around",
+          abbr: ["a."],
+          type: postfix,
+          rule: postfixOp(/(AROUND|a\.)\s+([-+]?[0-9]*\.?[0-9]+)/i, 2).map((x) => parseFloat(x)),
+          map: (radius, target) => {
+            return B7.struct.modifier.exceptBy({
+              "0": B7.struct.filter.within({
+                "0": B7.struct.generator.all(),
+                target,
+                "max-radius": radius
+              }),
+              by: target
+            });
+          }
+        },
+        {
+          "@desc": "Expands s1 by all atoms within X Angstroms of the center of any atom in s1.",
+          "@examples": ["chain A EXPAND 3"],
+          name: "expand",
+          abbr: ["x."],
+          type: postfix,
+          rule: postfixOp(/(EXPAND|x\.)\s+([-+]?[0-9]*\.?[0-9]+)/i, 2).map((x) => parseFloat(x)),
+          map: (radius, selection) => {
+            return B7.struct.modifier.includeSurroundings({ 0: selection, radius });
+          }
+        },
+        {
+          "@desc": "Selects atoms in s1 that are within X Angstroms of any atom in s2.",
+          "@examples": ["chain A WITHIN 3 OF chain B"],
+          name: "within",
+          abbr: ["w."],
+          type: binaryLeft,
+          rule: ofOp("WITHIN", "w."),
+          map: (radius, selection, target) => {
+            return B7.struct.filter.within({
+              0: selection,
+              target,
+              "max-radius": radius
+            });
+          }
+        },
+        {
+          "@desc": "Same as within, but excludes s2 from the selection (and thus is identical to s1 and s2 around X).",
+          "@examples": ["chain A NEAR_TO 3 OF chain B"],
+          name: "near_to",
+          abbr: ["nto."],
+          type: binaryLeft,
+          rule: ofOp("NEAR_TO", "nto."),
+          map: (radius, selection, target) => {
+            return B7.struct.modifier.exceptBy({
+              "0": B7.struct.filter.within({
+                "0": selection,
+                target,
+                "max-radius": radius
+              }),
+              by: target
+            });
+          }
+        },
+        {
+          "@desc": "Selects atoms in s1 that are at least X Anstroms away from s2.",
+          "@examples": ["solvent BEYOND 2 OF chain A"],
+          name: "beyond",
+          abbr: ["be."],
+          type: binaryLeft,
+          rule: ofOp("BEYOND", "be."),
+          map: (radius, selection, target) => {
+            return B7.struct.modifier.exceptBy({
+              "0": B7.struct.filter.within({
+                "0": selection,
+                target,
+                "max-radius": radius,
+                invert: true
+              }),
+              by: target
+            });
+          }
+        },
+        {
+          "@desc": "Expands selection to complete residues.",
+          "@examples": ["BYRESIDUE name N"],
+          name: "byresidue",
+          abbr: ["byresi", "byres", "br."],
+          type: prefix,
+          rule: prefixOp(/BYRESIDUE|byresi|byres|br\./i),
+          map: (op2, selection) => {
+            return asAtoms(B7.struct.modifier.expandProperty({
+              "0": B7.struct.modifier.union({ 0: selection }),
+              property: B7.ammp("residueKey")
+            }));
+          }
+        },
+        {
+          "@desc": "Completely selects all alpha carbons in all residues covered by a selection.",
+          "@examples": ["BYCALPHA chain A"],
+          name: "bycalpha",
+          abbr: ["bca."],
+          type: prefix,
+          rule: prefixOp(/BYCALPHA|bca\./i),
+          map: (op2, selection) => {
+            return B7.struct.generator.queryInSelection({
+              "0": B7.struct.modifier.expandProperty({
+                "0": B7.struct.modifier.union({ 0: selection }),
+                property: B7.ammp("residueKey")
+              }),
+              query: B7.struct.generator.atomGroups({
+                "atom-test": B7.core.rel.eq([
+                  B7.atomName("CA"),
+                  B7.ammp("label_atom_id")
+                ])
+              })
+            });
+          }
+        },
+        {
+          "@desc": "Expands selection to complete molecules.",
+          "@examples": ["BYMOLECULE resi 20-30"],
+          name: "bymolecule",
+          isUnsupported: true,
+          // structure-query.atom-property.topology.connected-component-key' is not implemented
+          abbr: ["bymol", "bm."],
+          type: prefix,
+          rule: prefixOp(/BYMOLECULE|bymol|bm\./i),
+          map: (op2, selection) => {
+            return asAtoms(B7.struct.modifier.expandProperty({
+              "0": B7.struct.modifier.union({ 0: selection }),
+              property: B7.atp("connectedComponentKey")
+            }));
+          }
+        },
+        {
+          "@desc": "Expands selection to complete fragments.",
+          "@examples": ["BYFRAGMENT resi 10"],
+          name: "byfragment",
+          abbr: ["byfrag", "bf."],
+          isUnsupported: true,
+          type: prefix,
+          rule: prefixOp(/BYFRAGMENT|byfrag|bf\./i),
+          map: (op2, selection) => [op2, selection]
+        },
+        {
+          "@desc": "Expands selection to complete segments.",
+          "@examples": ["BYSEGMENT resn CYS"],
+          name: "bysegment",
+          abbr: ["bysegi", "byseg", "bs."],
+          type: prefix,
+          rule: prefixOp(/BYSEGMENT|bysegi|byseg|bs\./i),
+          map: (op2, selection) => {
+            return asAtoms(B7.struct.modifier.expandProperty({
+              "0": B7.struct.modifier.union({ 0: selection }),
+              property: B7.ammp("chainKey")
+            }));
+          }
+        },
+        {
+          "@desc": "Expands selection to complete objects.",
+          "@examples": ["BYOBJECT chain A"],
+          name: "byobject",
+          abbr: ["byobj", "bo."],
+          isUnsupported: true,
+          type: prefix,
+          rule: prefixOp(/BYOBJECT|byobj|bo\./i),
+          map: (op2, selection) => [op2, selection]
+        },
+        {
+          "@desc": "Expands selection to unit cell.",
+          "@examples": ["BYCELL chain A"],
+          name: "bycell",
+          isUnsupported: true,
+          type: prefix,
+          rule: prefixOp(/BYCELL/i),
+          map: (op2, selection) => [op2, selection]
+        },
+        {
+          "@desc": "All rings of size \u2264 7 which have at least one atom in s1.",
+          "@examples": ["BYRING resn HEM"],
+          name: "byring",
+          // isUnsupported: true, // structure-query.atom-set.atom-count' is not implemented.
+          type: prefix,
+          rule: prefixOp(/BYRING/i),
+          map: (op2, selection) => {
+            return asAtoms(B7.struct.modifier.intersectBy({
+              "0": B7.struct.filter.pick({
+                "0": B7.struct.generator.rings(),
+                test: B7.core.logic.and([
+                  B7.core.rel.lte([B7.struct.atomSet.atomCount(), 7]),
+                  B7.core.rel.gr([B7.struct.atomSet.countQuery([selection]), 1])
+                ])
+              }),
+              by: selection
+            }));
+          }
+        },
+        {
+          "@desc": "Selects atoms directly bonded to s1, excludes s1.",
+          "@examples": ["NEIGHBOR resn CYS"],
+          name: "neighbor",
+          type: prefix,
+          abbr: ["nbr."],
+          rule: prefixOp(/NEIGHBOR|nbr\./i),
+          map: (op2, selection) => {
+            return B7.struct.modifier.exceptBy({
+              "0": asAtoms(B7.struct.modifier.includeConnected({
+                "0": B7.struct.modifier.union({ 0: selection }),
+                "bond-test": true
+              })),
+              by: selection
+            });
+          }
+        },
+        {
+          "@desc": "Selects atoms directly bonded to s1, may include s1.",
+          "@examples": ["BOUND_TO name CA"],
+          name: "bound_to",
+          abbr: ["bto."],
+          type: prefix,
+          rule: prefixOp(/BOUND_TO|bto\./i),
+          map: (op2, selection) => {
+            return asAtoms(B7.struct.modifier.includeConnected({
+              "0": B7.struct.modifier.union({ 0: selection })
+            }));
+          }
+        },
+        {
+          "@desc": "Extends s1 by X bonds connected to atoms in s1.",
+          "@examples": ["resname LIG EXTEND 3"],
+          name: "extend",
+          abbr: ["xt."],
+          type: postfix,
+          rule: postfixOp(/(EXTEND|xt\.)\s+([0-9]+)/i, 2).map((x) => parseInt(x)),
+          map: (count3, selection) => {
+            return asAtoms(B7.struct.modifier.includeConnected({
+              "0": B7.struct.modifier.union({ 0: selection }),
+              "bond-test": true,
+              "layer-count": count3
+            }));
+          }
+        }
+      ];
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/pymol/keywords.js
+  function backboneExpr2() {
+    return B8.struct.combinator.merge([
+      B8.struct.modifier.intersectBy({
+        0: B8.struct.generator.atomGroups({
+          "residue-test": B8.core.set.has([
+            B8.core.type.set(ResDict2.protein),
+            B8.ammp("label_comp_id")
+          ])
+        }),
+        by: B8.struct.generator.atomGroups({
+          "atom-test": B8.core.set.has([
+            B8.core.type.set(Backbone2.protein),
+            B8.ammp("label_atom_id")
+          ])
+        })
+      }),
+      B8.struct.modifier.intersectBy({
+        0: B8.struct.generator.atomGroups({
+          "residue-test": B8.core.set.has([
+            B8.core.type.set(ResDict2.nucleic),
+            B8.ammp("label_comp_id")
+          ])
+        }),
+        by: B8.struct.generator.atomGroups({
+          "atom-test": B8.core.set.has([
+            B8.core.type.set(Backbone2.nucleic),
+            B8.ammp("label_atom_id")
+          ])
+        })
+      })
+    ]);
+  }
+  var B8, ResDict2, Backbone2, keywords2;
+  var init_keywords2 = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/pymol/keywords.js"() {
+      init_builder();
+      init_helper();
+      B8 = MolScriptBuilder;
+      ResDict2 = {
+        nucleic: ["A", "C", "T", "G", "U", "DA", "DC", "DT", "DG", "DU"],
+        protein: ["ALA", "ARG", "ASN", "ASP", "CYS", "CYX", "GLN", "GLU", "GLY", "HIS", "HID", "HIE", "HIP", "ILE", "LEU", "LYS", "MET", "MSE", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL"],
+        solvent: ["HOH", "WAT", "H20", "TIP", "SOL"]
+      };
+      Backbone2 = {
+        nucleic: [
+          "P",
+          "O3'",
+          "O5'",
+          "C5'",
+          "C4'",
+          "C3'",
+          "OP1",
+          "OP2",
+          "O3*",
+          "O5*",
+          "C5*",
+          "C4*",
+          "C3*",
+          "C2'",
+          "C1'",
+          "O4'",
+          "O2'"
+        ],
+        protein: ["C", "N", "CA", "O"]
+      };
+      keywords2 = {
+        all: {
+          "@desc": "All atoms currently loaded into PyMOL",
+          abbr: ["*"],
+          map: () => B8.struct.generator.all()
+        },
+        none: {
+          "@desc": "No atoms (empty selection)",
+          map: () => B8.struct.generator.empty()
+        },
+        hydrogens: {
+          "@desc": "All hydrogen atoms currently loaded into PyMOL",
+          abbr: ["hydro", "h."],
+          map: () => B8.struct.generator.atomGroups({
+            "atom-test": B8.core.rel.eq([
+              B8.acp("elementSymbol"),
+              B8.es("H")
+            ])
+          })
+        },
+        hetatm: {
+          "@desc": "All atoms loaded from Protein Data Bank HETATM records",
+          abbr: ["het"],
+          map: () => B8.struct.generator.atomGroups({
+            "atom-test": B8.core.rel.eq([B8.ammp("isHet"), true])
+          })
+        },
+        visible: {
+          "@desc": "All atoms in enabled objects with at least one visible representation",
+          abbr: ["v."]
+        },
+        polymer: {
+          "@desc": "All atoms on the polymer (not het). Finds atoms with residue identifiers matching a known polymer, such a peptide and DNA.",
+          abbr: ["pol."],
+          map: () => B8.struct.generator.atomGroups({
+            "residue-test": B8.core.set.has([
+              B8.core.type.set(ResDict2.nucleic.concat(ResDict2.protein)),
+              B8.ammp("label_comp_id")
+            ])
+          })
+        },
+        sidechain: {
+          "@desc": "Polymer non-backbone atoms (new in PyMOL 1.6.1)",
+          abbr: ["sc."],
+          map: () => {
+            return B8.struct.modifier.exceptBy({
+              "0": B8.struct.generator.atomGroups({
+                "residue-test": B8.core.set.has([
+                  B8.core.type.set(ResDict2.nucleic.concat(ResDict2.protein)),
+                  B8.ammp("label_comp_id")
+                ])
+              }),
+              by: backboneExpr2()
+            });
+          }
+        },
+        present: {
+          "@desc": "All atoms with defined coordinates in the current state (used in creating movies)",
+          abbr: ["pr."]
+        },
+        center: {
+          "@desc": "Pseudo-atom at the center of the scene"
+        },
+        origin: {
+          "@desc": "Pseudo-atom at the origin of rotation"
+        },
+        enabled: {
+          "@desc": "All enabled objects or selections from the object list."
+        },
+        masked: {
+          "@desc": "All masked atoms.",
+          abbr: ["msk."]
+        },
+        protected: {
+          "@desc": "All protected atoms.",
+          abbr: ["pr."]
+        },
+        bonded: {
+          "@desc": "All bonded atoms",
+          map: () => B8.struct.generator.atomGroups({
+            "atom-test": B8.core.rel.gr([B8.struct.atomProperty.core.bondCount({
+              flags: B8.struct.type.bondFlags(["covalent", "metallic", "sulfide"])
+            }), 0])
+          })
+        },
+        donors: {
+          "@desc": "All hydrogen bond donor atoms.",
+          abbr: ["don."]
+        },
+        acceptors: {
+          "@desc": "All hydrogen bond acceptor atoms.",
+          abbr: ["acc."]
+        },
+        fixed: {
+          "@desc": "All fixed atoms.",
+          abbr: ["fxd."]
+        },
+        restrained: {
+          "@desc": "All restrained atoms.",
+          abbr: ["rst."]
+        },
+        organic: {
+          "@desc": "All atoms in non-polymer organic compounds (e.g. ligands, buffers). Finds carbon-containing molecules that do not match known polymers.",
+          abbr: ["org."],
+          map: () => asAtoms(B8.struct.modifier.expandProperty({
+            "0": B8.struct.modifier.union([
+              B8.struct.generator.queryInSelection({
+                "0": B8.struct.generator.atomGroups({
+                  "residue-test": B8.core.logic.not([
+                    B8.core.set.has([
+                      B8.core.type.set(ResDict2.nucleic.concat(ResDict2.protein)),
+                      B8.ammp("label_comp_id")
+                    ])
+                  ])
+                }),
+                query: B8.struct.generator.atomGroups({
+                  "atom-test": B8.core.rel.eq([
+                    B8.es("C"),
+                    B8.acp("elementSymbol")
+                  ])
+                })
+              })
+            ]),
+            property: B8.ammp("residueKey")
+          }))
+        },
+        inorganic: {
+          "@desc": "All non-polymer inorganic atoms/ions. Finds atoms in molecules that do not contain carbon and do not match any known solvent residues.",
+          abbr: ["ino."],
+          map: () => asAtoms(B8.struct.modifier.expandProperty({
+            "0": B8.struct.modifier.union([
+              B8.struct.filter.pick({
+                "0": B8.struct.generator.atomGroups({
+                  "residue-test": B8.core.logic.not([
+                    B8.core.set.has([
+                      B8.core.type.set(ResDict2.nucleic.concat(ResDict2.protein).concat(ResDict2.solvent)),
+                      B8.ammp("label_comp_id")
+                    ])
+                  ]),
+                  "group-by": B8.ammp("residueKey")
+                }),
+                test: B8.core.logic.not([
+                  B8.core.set.has([
+                    B8.struct.atomSet.propertySet([B8.acp("elementSymbol")]),
+                    B8.es("C")
+                  ])
+                ])
+              })
+            ]),
+            property: B8.ammp("residueKey")
+          }))
+        },
+        solvent: {
+          "@desc": "All water molecules. The hardcoded solvent residue identifiers are currently: HOH, WAT, H20, TIP, SOL.",
+          abbr: ["sol."],
+          map: () => B8.struct.generator.atomGroups({
+            "residue-test": B8.core.set.has([
+              B8.core.type.set(ResDict2.solvent),
+              B8.ammp("label_comp_id")
+            ])
+          })
+        },
+        guide: {
+          "@desc": "All protein CA and nucleic acid C4*/C4",
+          map: () => B8.struct.combinator.merge([
+            B8.struct.generator.atomGroups({
+              "atom-test": B8.core.rel.eq([
+                B8.atomName("CA"),
+                B8.ammp("label_atom_id")
+              ]),
+              "residue-test": B8.core.set.has([
+                B8.core.type.set(ResDict2.protein),
+                B8.ammp("label_comp_id")
+              ])
+            }),
+            B8.struct.generator.atomGroups({
+              "atom-test": B8.core.set.has([
+                atomNameSet(["C4*", "C4'"]),
+                B8.ammp("label_atom_id")
+              ]),
+              "residue-test": B8.core.set.has([
+                B8.core.type.set(ResDict2.nucleic),
+                B8.ammp("label_comp_id")
+              ])
+            })
+          ])
+        },
+        metals: {
+          "@desc": "All metal atoms (new in PyMOL 1.6.1)"
+        },
+        backbone: {
+          "@desc": "Polymer backbone atoms (new in PyMOL 1.6.1)",
+          abbr: ["bb."],
+          map: () => backboneExpr2()
+        },
+        "polymer.protein": {
+          "@desc": "Protein (New in PyMOL 2.1)",
+          abbr: ["polymer.protein"],
+          map: () => B8.struct.generator.atomGroups({
+            "residue-test": B8.core.set.has([
+              B8.core.type.set(ResDict2.protein),
+              B8.ammp("label_comp_id")
+            ])
+          })
+        },
+        "polymer.nucleic": {
+          "@desc": "Nucleic Acid (New in PyMOL 2.1)",
+          abbr: ["polymer.nucleic"],
+          map: () => B8.struct.generator.atomGroups({
+            "residue-test": B8.core.set.has([
+              B8.core.type.set(ResDict2.nucleic),
+              B8.ammp("label_comp_id")
+            ])
+          })
+        }
+      };
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/pymol/parser.js
+  function orNull(rule) {
+    return rule.or(MonadicParser.of(null));
+  }
+  function atomSelectionQuery(x) {
+    const tests = {};
+    const props = {};
+    for (const k in x) {
+      const ps = properties2[k];
+      if (!ps) {
+        throw new Error(`property '${k}' not supported, value '${x[k]}'`);
+      }
+      if (x[k] === null)
+        continue;
+      if (!props[ps.level])
+        props[ps.level] = [];
+      props[ps.level].push(x[k]);
+    }
+    for (const p3 in props) {
+      tests[p3] = andExpr(props[p3]);
+    }
+    return B9.struct.generator.atomGroups(tests);
+  }
+  var B9, propertiesDict, slash, lang2, transpiler2;
+  var init_parser6 = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/pymol/parser.js"() {
+      init_monadic_parser();
+      init_helper();
+      init_builder();
+      init_properties4();
+      init_operators2();
+      init_keywords2();
+      B9 = MolScriptBuilder;
+      propertiesDict = getPropertyRules(properties2);
+      slash = MonadicParser.string("/");
+      lang2 = MonadicParser.createLanguage({
+        Parens: function(r) {
+          return MonadicParser.alt(r.Parens, r.Operator, r.Expression).wrap(MonadicParser.string("("), MonadicParser.string(")"));
+        },
+        Expression: function(r) {
+          return MonadicParser.alt(r.Keywords, r.AtomSelectionMacro.map(atomSelectionQuery), r.NamedAtomProperties, r.Pepseq, r.Rep, r.Object);
+        },
+        AtomSelectionMacro: function(r) {
+          return MonadicParser.alt(slash.then(MonadicParser.alt(MonadicParser.seq(orNull(r.ObjectProperty).skip(slash), orNull(propertiesDict.segi).skip(slash), orNull(propertiesDict.chain).skip(slash), orNull(propertiesDict.resi).skip(slash), orNull(propertiesDict.name)).map((x) => {
+            return { object: x[0], segi: x[1], chain: x[2], resi: x[3], name: x[4] };
+          }), MonadicParser.seq(orNull(r.ObjectProperty).skip(slash), orNull(propertiesDict.segi).skip(slash), orNull(propertiesDict.chain).skip(slash), orNull(propertiesDict.resi)).map((x) => {
+            return { object: x[0], segi: x[1], chain: x[2], resi: x[3] };
+          }), MonadicParser.seq(orNull(r.ObjectProperty).skip(slash), orNull(propertiesDict.segi).skip(slash), orNull(propertiesDict.chain)).map((x) => {
+            return { object: x[0], segi: x[1], chain: x[2] };
+          }), MonadicParser.seq(orNull(r.ObjectProperty).skip(slash), orNull(propertiesDict.segi)).map((x) => {
+            return { object: x[0], segi: x[1] };
+          }), MonadicParser.seq(orNull(r.ObjectProperty)).map((x) => {
+            return { object: x[0] };
+          }))), MonadicParser.alt(MonadicParser.seq(orNull(r.ObjectProperty).skip(slash), orNull(propertiesDict.segi).skip(slash), orNull(propertiesDict.chain).skip(slash), orNull(propertiesDict.resi).skip(slash), orNull(propertiesDict.name)).map((x) => {
+            return { object: x[0], segi: x[1], chain: x[2], resi: x[3], name: x[4] };
+          }), MonadicParser.seq(orNull(propertiesDict.segi).skip(slash), orNull(propertiesDict.chain).skip(slash), orNull(propertiesDict.resi).skip(slash), orNull(propertiesDict.name)).map((x) => {
+            return { segi: x[0], chain: x[1], resi: x[2], name: x[3] };
+          }), MonadicParser.seq(orNull(propertiesDict.chain).skip(slash), orNull(propertiesDict.resi).skip(slash), orNull(propertiesDict.name)).map((x) => {
+            return { chain: x[0], resi: x[1], name: x[2] };
+          }), MonadicParser.seq(orNull(propertiesDict.resi).skip(slash), orNull(propertiesDict.name)).map((x) => {
+            return { resi: x[0], name: x[1] };
+          })));
+        },
+        NamedAtomProperties: function() {
+          return MonadicParser.alt(...getNamedPropertyRules(properties2));
+        },
+        Keywords: () => MonadicParser.alt(...getKeywordRules(keywords2)),
+        ObjectProperty: () => {
+          const w = getReservedWords(properties2, keywords2, operators2).sort(strLenSortFn).map(escapeRegExp).join("|");
+          return MonadicParser.regexp(new RegExp(`(?!(${w}))[A-Z0-9_]+`, "i"));
+        },
+        Object: (r) => {
+          return r.ObjectProperty.notFollowedBy(slash).map((x) => {
+            throw new Error(`property 'object' not supported, value '${x}'`);
+          });
+        },
+        // Selects peptide sequence matching upper-case one-letter
+        // sequence SEQ (see also FindSeq).
+        // PEPSEQ seq
+        Pepseq: () => {
+          return MonadicParser.regexp(/(PEPSEQ|ps\.)\s+([a-z]+)/i, 2).map(makeError(`operator 'pepseq' not supported`));
+        },
+        // Selects atoms which show representation rep.
+        // REP rep
+        Rep: () => {
+          return MonadicParser.regexp(/REP\s+(lines|spheres|mesh|ribbon|cartoon|sticks|dots|surface|labels|extent|nonbonded|nb_spheres|slice|extent|slice|dashes|angles|dihedrals|cgo|cell|callback|everything)/i, 1).map(makeError(`operator 'rep' not supported`));
+        },
+        Operator: function(r) {
+          return combineOperators(operators2, MonadicParser.alt(r.Parens, r.Expression, r.Operator));
+        },
+        Query: function(r) {
+          return MonadicParser.alt(r.Operator, r.Parens, r.Expression).trim(MonadicParser.optWhitespace);
+        }
+      });
+      transpiler2 = (str11) => lang2.Query.tryParse(str11);
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/vmd/properties.js
+  function str10(x) {
+    return x;
+  }
+  function sstrucMap(x) {
+    return B10.struct.type.secondaryStructureFlags([sstrucDict2[x.toUpperCase()] || "none"]);
+  }
+  var B10, reFloat3, rePosInt2, reInt, sstrucDict2, properties3;
+  var init_properties5 = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/vmd/properties.js"() {
+      init_builder();
+      B10 = MolScriptBuilder;
+      reFloat3 = /[-+]?[0-9]*\.?[0-9]+/;
+      rePosInt2 = /[+]?[0-9]+/;
+      reInt = /[-+]?[0-9]+/;
+      sstrucDict2 = {
+        T: "turn",
+        // Turn
+        E: "sheet",
+        // Extended conformation ($\beta$ sheets)
+        B: "strand",
+        // Isolated bridge
+        H: "alpha",
+        // Alpha helix
+        G: "3-10",
+        // 3-10 helix
+        I: "pi",
+        // Pi helix
+        C: "none"
+        // Coil
+      };
+      properties3 = {
+        name: {
+          "@desc": "str    atom name",
+          "@examples": ["name CA"],
+          regex: /[a-zA-Z0-9]+/,
+          map: B10.atomName,
+          level: "atom-test",
+          property: B10.ammp("label_atom_id")
+        },
+        type: {
+          "@desc": "str    atom type",
+          "@examples": ["type C3"],
+          isUnsupported: true,
+          regex: /[a-zA-Z0-9]+/,
+          map: str10,
+          level: "atom-test"
+        },
+        index: {
+          "@desc": "num    the atom number, starting at 0",
+          "@examples": ["index 10"],
+          isNumeric: true,
+          regex: rePosInt2,
+          map: (x) => parseInt(x) - 1,
+          level: "atom-test",
+          property: B10.ammp("id")
+        },
+        serial: {
+          "@desc": "num    the atom number, starting at 1",
+          "@examples": ["serial 11"],
+          isNumeric: true,
+          regex: rePosInt2,
+          map: (x) => parseInt(x),
+          level: "atom-test",
+          property: B10.ammp("id")
+        },
+        atomicnumber: {
+          "@desc": "num    atomic number (0 if undefined)",
+          "@examples": ["atomicnumber 13"],
+          isNumeric: true,
+          regex: rePosInt2,
+          map: (x) => parseInt(x),
+          level: "atom-test",
+          property: B10.acp("atomicNumber")
+        },
+        element: {
+          "@desc": 'str  atomic element symbol string ("X" if undefined)',
+          "@examples": ["element N"],
+          regex: /[a-zA-Z0-9]{1,3}/,
+          map: (x) => B10.es(x),
+          level: "atom-test",
+          property: B10.acp("elementSymbol")
+        },
+        altloc: {
+          "@desc": "str  alternate location/conformation identifier",
+          "@examples": ["altloc C"],
+          regex: /[a-zA-Z0-9]+/,
+          map: str10,
+          level: "atom-test",
+          property: B10.ammp("label_alt_id")
+        },
+        chain: {
+          "@desc": "str  the one-character chain identifier",
+          "@examples": ["chain A"],
+          regex: /[a-zA-Z0-9]+/,
+          map: str10,
+          level: "residue-test",
+          property: B10.ammp("auth_asym_id")
+        },
+        residue: {
+          "@desc": "num  a set of connected atoms with the same residue number",
+          "@examples": ["residue < 11", "residue 11"],
+          isNumeric: true,
+          regex: reInt,
+          map: (x) => parseInt(x),
+          level: "residue-test",
+          property: B10.ammp("auth_seq_id")
+        },
+        fragment: {
+          "@desc": "num  a set of connected residues",
+          "@examples": ["fragment 42"],
+          isUnsupported: true,
+          isNumeric: true,
+          regex: reInt,
+          map: (x) => parseInt(x),
+          level: "residue-test"
+        },
+        pfrag: {
+          "@desc": "num  a set of connected protein residues",
+          "@examples": ["pfrag 42"],
+          isUnsupported: true,
+          isNumeric: true,
+          regex: reInt,
+          map: (x) => parseInt(x),
+          level: "residue-test"
+        },
+        nfrag: {
+          "@desc": "num  a set of connected nucleic residues",
+          "@examples": ["nfrag 42"],
+          isUnsupported: true,
+          isNumeric: true,
+          regex: reInt,
+          map: (x) => parseInt(x),
+          level: "residue-test"
+        },
+        sequence: {
+          "@desc": "str  a sequence given by one letter names",
+          "@examples": ["sequence PGATTACA"],
+          isUnsupported: true,
+          regex: /[a-zA-Z0-9]+/,
+          map: str10,
+          level: "residue-test"
+        },
+        numbonds: {
+          "@desc": "num  number of bonds",
+          "@examples": ["numbonds = 2", "numbonds >= 3"],
+          isNumeric: true,
+          regex: rePosInt2,
+          map: (x) => parseInt(x),
+          level: "atom-test",
+          property: B10.acp("bondCount")
+        },
+        resname: {
+          "@desc": "str  residue name",
+          "@examples": ["resname ALA"],
+          regex: /[a-zA-Z0-9]+/,
+          map: str10,
+          level: "residue-test",
+          property: B10.ammp("auth_comp_id")
+        },
+        resid: {
+          "@desc": "num  residue id",
+          "@examples": ["resid 42"],
+          isNumeric: true,
+          regex: reInt,
+          map: (x) => parseInt(x),
+          level: "residue-test",
+          property: B10.ammp("auth_seq_id")
+        },
+        segname: {
+          "@desc": "str  segment name",
+          "@examples": ["segname B"],
+          regex: /[a-zA-Z0-9]+/,
+          map: str10,
+          level: "residue-test",
+          property: B10.ammp("label_asym_id")
+        },
+        x: {
+          "@desc": "float  x coordinate",
+          "@examples": ["x 42"],
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B10.acp("x")
+        },
+        y: {
+          "@desc": "float  y coordinate",
+          "@examples": ["y > 1.7"],
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B10.acp("y")
+        },
+        z: {
+          "@desc": "float  z coordinate",
+          "@examples": ["z < 11", "z > -21"],
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B10.acp("z")
+        },
+        radius: {
+          "@desc": "float  atomic radius",
+          "@examples": ["radius > 1.3"],
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B10.acp("vdw")
+        },
+        mass: {
+          "@desc": "float  atomic mass",
+          "@examples": ["mass > 2"],
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B10.acp("mass")
+        },
+        charge: {
+          "@desc": "float  atomic charge",
+          "@examples": ["charge > 0", "charge 1"],
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B10.ammp("pdbx_formal_charge")
+        },
+        beta: {
+          "@desc": "float  temperature factor",
+          "@examples": ["beta < 20", "beta > 35"],
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B10.ammp("B_iso_or_equiv")
+        },
+        occupancy: {
+          "@desc": "float  occupancy",
+          "@examples": ["occupancy 1", "occupancy < 1"],
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseFloat(x),
+          level: "atom-test",
+          property: B10.ammp("occupancy")
+        },
+        user: {
+          "@desc": "float  time-varying user-specified value",
+          "@examples": ["user < 0.1"],
+          isUnsupported: true,
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseFloat(x),
+          level: "atom-test"
+        },
+        rasmol: {
+          "@desc": "str  translates Rasmol selection string to VMD",
+          "@examples": ["rasmol 'all'"],
+          isUnsupported: true,
+          regex: /[^']*/,
+          map: str10,
+          level: "atom-test"
+        },
+        structure: {
+          "@desc": "str  single letter name for the secondary structure",
+          "@examples": ["structure H", "structure H E"],
+          regex: /T|E|B|H|G|I|C/i,
+          map: sstrucMap,
+          level: "atom-test",
+          property: B10.ammp("secondaryStructureFlags")
+        },
+        phi: {
+          "@desc": "float  phi backbone conformational angles",
+          "@examples": ["phi < 160"],
+          isUnsupported: true,
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseFloat(x),
+          level: "residue-test"
+        },
+        psi: {
+          "@desc": "float  psi backbone conformational angles",
+          "@examples": ["psi < 160"],
+          isUnsupported: true,
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseFloat(x),
+          level: "residue-test"
+        },
+        ufx: {
+          "@desc": "num  force to apply in the x coordinate",
+          "@examples": ["ufx 1"],
+          isUnsupported: true,
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseInt(x),
+          level: "atom-test"
+        },
+        ufy: {
+          "@desc": "num  force to apply in the y coordinate",
+          "@examples": ["ufy 1"],
+          isUnsupported: true,
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseInt(x),
+          level: "atom-test"
+        },
+        ufz: {
+          "@desc": "num  force to apply in the z coordinate",
+          "@examples": ["ufz 1"],
+          isUnsupported: true,
+          isNumeric: true,
+          regex: reFloat3,
+          map: (x) => parseInt(x),
+          level: "atom-test"
+        }
+      };
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/vmd/operators.js
+  var B11, propNames, operators3;
+  var init_operators3 = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/vmd/operators.js"() {
+      init_monadic_parser();
+      init_helper();
+      init_builder();
+      init_properties5();
+      B11 = MolScriptBuilder;
+      propNames = Object.keys(properties3).sort(strLenSortFn).filter((name) => !properties3[name].isUnsupported).join("|");
+      operators3 = [
+        {
+          "@desc": "Selects atoms that are not included in s1.",
+          "@examples": ["not protein"],
+          name: "not",
+          type: prefix,
+          rule: MonadicParser.regexp(/NOT/i).skip(MonadicParser.whitespace),
+          map: (op2, selection) => invertExpr(selection)
+        },
+        {
+          "@desc": "Selects atoms within a specified distance of a selection",
+          "@examples": ["within 5 of name FE"],
+          name: "within",
+          type: prefix,
+          rule: prefixOp(/WITHIN\s+([-+]?[0-9]*\.?[0-9]+)\s+OF/i, 1).map((x) => parseFloat(x)),
+          map: (radius, selection) => {
+            return B11.struct.modifier.includeSurroundings({ 0: selection, radius });
+          }
+        },
+        {
+          "@desc": "Exclusive within, equivalent to (within 3 of X) and not X",
+          "@examples": ["exwithin 10 of resname HEM"],
+          name: "exwithin",
+          type: prefix,
+          rule: prefixOp(/EXWITHIN\s+([-+]?[0-9]*\.?[0-9]+)\s+OF/i, 1).map((x) => parseFloat(x)),
+          map: (radius, target) => {
+            return B11.struct.modifier.exceptBy({
+              "0": B11.struct.modifier.includeSurroundings({ 0: target, radius }),
+              by: target
+            });
+          }
+        },
+        {
+          "@desc": "Selects atoms which have the same keyword as the atoms in a given selection",
+          "@examples": ["same resid as name FE"],
+          name: "same",
+          type: prefix,
+          rule: prefixOp(new RegExp(`SAME\\s+(${propNames})\\s+AS`, "i"), 1).map((x) => properties3[x].property),
+          map: (property2, source) => {
+            return B11.struct.filter.withSameAtomProperties({
+              "0": B11.struct.generator.all(),
+              source,
+              property: property2
+            });
+          }
+        },
+        {
+          "@desc": "Selects atoms included in both s1 and s2.",
+          "@examples": ["backbone and protein"],
+          name: "and",
+          type: binaryLeft,
+          rule: MonadicParser.alt(infixOp(/AND/i), MonadicParser.whitespace),
+          map: (op2, selection, by) => B11.struct.modifier.intersectBy({ 0: selection, by })
+        },
+        {
+          "@desc": "Selects atoms included in either s1 or s2.",
+          "@examples": ["water or protein"],
+          name: "or",
+          type: binaryLeft,
+          rule: infixOp(/OR/i),
+          map: (op2, s1, s2) => B11.struct.combinator.merge([s1, s2])
+        }
+      ];
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/vmd/keywords.js
+  function proteinExpr2() {
+    return B12.struct.filter.pick({
+      0: B12.struct.generator.atomGroups({
+        "group-by": B12.ammp("residueKey")
+      }),
+      test: B12.core.set.isSubset([
+        atomNameSet(["C", "N", "CA", "O"]),
+        B12.ammpSet("label_atom_id")
+      ])
+    });
+  }
+  function nucleicExpr2() {
+    return B12.struct.filter.pick({
+      0: B12.struct.generator.atomGroups({
+        "group-by": B12.ammp("residueKey")
+      }),
+      test: B12.core.logic.and([
+        B12.core.set.isSubset([
+          atomNameSet(["P"]),
+          B12.ammpSet("label_atom_id")
+        ]),
+        B12.core.logic.or([
+          B12.core.set.isSubset([
+            atomNameSet(["O3'", "C3'", "C4'", "C5'", "O5'"]),
+            B12.ammpSet("label_atom_id")
+          ]),
+          B12.core.set.isSubset([
+            atomNameSet(["O3*", "C3*", "C4*", "C5*", "O5*"]),
+            B12.ammpSet("label_atom_id")
+          ])
+        ])
+      ])
+    });
+  }
+  function backboneExpr3() {
+    return B12.struct.combinator.merge([
+      B12.struct.generator.queryInSelection({
+        0: proteinExpr2(),
+        query: B12.struct.generator.atomGroups({
+          "atom-test": B12.core.set.has([
+            atomNameSet(Backbone3.protein),
+            B12.ammp("label_atom_id")
+          ])
+        })
+      }),
+      B12.struct.generator.queryInSelection({
+        0: nucleicExpr2(),
+        query: B12.struct.generator.atomGroups({
+          "atom-test": B12.core.set.has([
+            atomNameSet(Backbone3.nucleic),
+            B12.ammp("label_atom_id")
+          ])
+        })
+      })
+    ]);
+  }
+  function secStrucExpr(flags2) {
+    return B12.struct.generator.atomGroups({
+      "residue-test": B12.core.flags.hasAll([
+        B12.ammp("secondaryStructureFlags"),
+        B12.struct.type.secondaryStructureFlags(flags2)
+      ])
+    });
+  }
+  var B12, Backbone3, ResDict3, keywords3;
+  var init_keywords3 = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/vmd/keywords.js"() {
+      init_helper();
+      init_builder();
+      B12 = MolScriptBuilder;
+      Backbone3 = {
+        nucleic: ["P", "O3'", "O5'", "C5'", "C4'", "C3'", "OP1", "OP2", "O3*", "O5*", "C5*", "C4*", "C3*"],
+        protein: ["C", "N", "CA", "O"]
+      };
+      ResDict3 = {
+        acidic: ["ASP", "GLU"],
+        aliphatic: ["ALA", "GLY", "ILE", "LEU", "VAL"],
+        aromatic: ["HIS", "PHE", "TRP", "TYR"],
+        at: ["ADA", "A", "THY", "T"],
+        basic: ["ARG", "HIS", "LYS"],
+        buried: ["ALA", "LEU", "VAL", "ILE", "PHE", "CYS", "MET", "TRP"],
+        cg: ["CYT", "C", "GUA", "G"],
+        cyclic: ["HIS", "PHE", "PRO", "TRP", "TYR"],
+        hydrophobic: ["ALA", "LEU", "VAL", "ILE", "PRO", "PHE", "MET", "TRP"],
+        medium: ["VAL", "THR", "ASP", "ASN", "PRO", "CYS", "ASX", "PCA", "HYP"],
+        neutral: ["VAL", "PHE", "GLN", "TYR", "HIS", "CYS", "MET", "TRP", "ASX", "GLX", "PCA", "HYP"],
+        purine: ["ADE", "A", "GUA", "G"],
+        pyrimidine: ["CYT", "C", "THY", "T", "URI", "U"],
+        small: ["ALA", "GLY", "SER"],
+        water: ["H2O", "HH0", "OHH", "HOH", "OH2", "SOL", "WAT", "TIP", "TIP2", "TIP3", "TIP4"]
+      };
+      keywords3 = {
+        all: {
+          "@desc": "everything",
+          map: () => B12.struct.generator.all()
+        },
+        none: {
+          "@desc": "nothing",
+          map: () => B12.struct.generator.empty()
+        },
+        protein: {
+          "@desc": "a residue with atoms named C, N, CA, and O",
+          map: () => proteinExpr2()
+        },
+        nucleic: {
+          "@desc": "a residue with atoms named P, O1P, O2P and either O3', C3', C4', C5', O5' or O3*, C3*, C4*, C5*, O5*. This definition assumes that the base is phosphorylated, an assumption which will be corrected in the future.",
+          map: () => nucleicExpr2()
+        },
+        backbone: {
+          "@desc": "the C, N, CA, and O atoms of a protein and the equivalent atoms in a nucleic acid.",
+          map: () => backboneExpr3()
+        },
+        sidechain: {
+          "@desc": "non-backbone atoms and bonds",
+          // TODO: what does 'bonds' mean here?
+          map: () => invertExpr(backboneExpr3())
+        },
+        water: {
+          "@desc": "all atoms with the resname H2O, HH0, OHH, HOH, OH2, SOL, WAT, TIP, TIP2, TIP3 or TIP4",
+          abbr: ["waters"],
+          map: () => resnameExpr(ResDict3.water)
+        },
+        at: {
+          "@desc": "residues named ADA A THY T",
+          map: () => resnameExpr(ResDict3.at)
+        },
+        acidic: {
+          "@desc": "residues named ASP GLU",
+          map: () => resnameExpr(ResDict3.acidic)
+        },
+        acyclic: {
+          "@desc": '"protein and not cyclic"',
+          map: () => B12.struct.modifier.intersectBy({
+            0: proteinExpr2(),
+            by: invertExpr(resnameExpr(ResDict3.cyclic))
+          })
+        },
+        aliphatic: {
+          "@desc": "residues named ALA GLY ILE LEU VAL",
+          map: () => resnameExpr(ResDict3.aliphatic)
+        },
+        alpha: {
+          "@desc": "atom's residue is an alpha helix",
+          map: () => secStrucExpr(["alpha"])
+        },
+        amino: {
+          "@desc": "a residue with atoms named C, N, CA, and O",
+          map: () => proteinExpr2()
+        },
+        aromatic: {
+          "@desc": "residues named HIS PHE TRP TYR",
+          map: () => resnameExpr(ResDict3.aromatic)
+        },
+        basic: {
+          "@desc": "residues named ARG HIS LYS",
+          map: () => resnameExpr(ResDict3.basic)
+        },
+        bonded: {
+          "@desc": "atoms for which numbonds > 0",
+          map: () => asAtoms(B12.struct.filter.pick({
+            "0": B12.struct.modifier.includeConnected({
+              "0": B12.struct.generator.all(),
+              "bond-test": B12.core.flags.hasAny([
+                B12.struct.bondProperty.flags(),
+                B12.struct.type.bondFlags(["covalent", "metallic", "sulfide"])
+              ])
+            }),
+            test: B12.core.rel.gr([
+              B12.struct.atomSet.atomCount(),
+              1
+            ])
+          }))
+        },
+        buried: {
+          "@desc": "residues named ALA LEU VAL ILE PHE CYS MET TRP",
+          map: () => resnameExpr(ResDict3.buried)
+        },
+        cg: {
+          "@desc": "residues named CYT C GUA G",
+          map: () => resnameExpr(ResDict3.cg)
+        },
+        charged: {
+          "@desc": '"basic or acidic"',
+          map: () => resnameExpr(ResDict3.basic.concat(ResDict3.acidic))
+        },
+        cyclic: {
+          "@desc": "residues named HIS PHE PRO TRP TYR",
+          map: () => resnameExpr(ResDict3.cyclic)
+        },
+        hetero: {
+          "@desc": '"not (protein or nucleic)"',
+          map: () => invertExpr(B12.struct.combinator.merge([proteinExpr2(), nucleicExpr2()]))
+        },
+        hydrogen: {
+          "@desc": 'name "[0-9]?H.*"',
+          map: () => B12.struct.generator.atomGroups({
+            "atom-test": B12.core.str.match([
+              B12.core.type.regex(["^[0-9]?[H].*$", "i"]),
+              B12.core.type.str([B12.ammp("label_atom_id")])
+            ])
+          })
+        },
+        large: {
+          "@desc": '"protein and not (small or medium)"',
+          map: () => B12.struct.modifier.intersectBy({
+            0: proteinExpr2(),
+            by: invertExpr(resnameExpr(ResDict3.small.concat(ResDict3.medium)))
+          })
+        },
+        medium: {
+          "@desc": "residues named VAL THR ASP ASN PRO CYS ASX PCA HYP",
+          map: () => resnameExpr(ResDict3.medium)
+        },
+        neutral: {
+          "@desc": "residues named VAL PHE GLN TYR HIS CYS MET TRP ASX GLX PCA HYP",
+          map: () => resnameExpr(ResDict3.neutral)
+        },
+        hydrophobic: {
+          "@desc": "hydrophobic resname ALA LEU VAL ILE PRO PHE MET TRP",
+          map: () => resnameExpr(ResDict3.hydrophobic)
+        },
+        polar: {
+          "@desc": '"protein and not hydrophobic"',
+          map: () => B12.struct.modifier.intersectBy({
+            0: proteinExpr2(),
+            by: invertExpr(resnameExpr(ResDict3.hydrophobic))
+          })
+        },
+        purine: {
+          "@desc": "residues named ADE A GUA G",
+          map: () => resnameExpr(ResDict3.purine)
+        },
+        pyrimidine: {
+          "@desc": "residues named CYT C THY T URI U",
+          map: () => resnameExpr(ResDict3.pyrimidine)
+        },
+        small: {
+          "@desc": "residues named ALA GLY SER",
+          map: () => resnameExpr(ResDict3.small)
+        },
+        surface: {
+          "@desc": '"protein and not buried"',
+          map: () => B12.struct.modifier.intersectBy({
+            0: proteinExpr2(),
+            by: invertExpr(resnameExpr(ResDict3.buried))
+          })
+        },
+        alpha_helix: {
+          "@desc": "atom's residue is in an alpha helix",
+          map: () => secStrucExpr(["alpha"])
+        },
+        pi_helix: {
+          "@desc": "atom's residue is in a pi helix",
+          map: () => secStrucExpr(["pi"])
+        },
+        helix_3_10: {
+          "@desc": "atom's residue is in a 3-10 helix",
+          map: () => secStrucExpr(["3-10"])
+        },
+        helix: {
+          "@desc": "atom's residue is in an alpha or pi or 3-10 helix",
+          map: () => secStrucExpr(["helix"])
+        },
+        extended_beta: {
+          "@desc": "atom's residue is a beta sheet",
+          map: () => secStrucExpr(["sheet"])
+        },
+        bridge_beta: {
+          "@desc": "atom's residue is a beta sheet",
+          map: () => secStrucExpr(["strand"])
+        },
+        sheet: {
+          "@desc": "atom's residue is a beta sheet",
+          map: () => secStrucExpr(["beta"])
+        },
+        turn: {
+          "@desc": "atom's residue is in a turn conformation",
+          map: () => secStrucExpr(["turn"])
+        },
+        coil: {
+          "@desc": "atom's residue is in a coil conformation",
+          map: () => B12.struct.modifier.intersectBy({
+            0: proteinExpr2(),
+            by: secStrucExpr(["none"])
+          })
+        }
+      };
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/vmd/functions.js
+  var B13, functions;
+  var init_functions = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/vmd/functions.js"() {
+      init_builder();
+      B13 = MolScriptBuilder;
+      functions = {
+        "sqr": {
+          "@desc": "square of x",
+          "@examples": ["sqr(2)"],
+          map: (x) => B13.core.math.pow([x, 2])
+        },
+        "sqrt": {
+          "@desc": "square root of x",
+          "@examples": ["sqrt(2)"],
+          map: (x) => B13.core.math.sqrt([x])
+        },
+        "abs": {
+          "@desc": "absolute value of x",
+          "@examples": ["abs(2)"],
+          map: (x) => B13.core.math.abs([x])
+        },
+        "floor": {
+          "@desc": "largest integer not greater than x",
+          "@examples": ["floor(2)"],
+          map: (x) => B13.core.math.floor([x])
+        },
+        "ceil": {
+          "@desc": "smallest integer not less than x",
+          "@examples": ["ceil(2)"],
+          map: (x) => B13.core.math.ceil([x])
+        },
+        "sin": {
+          "@desc": "sine of x",
+          "@examples": ["sin(2)"],
+          map: (x) => B13.core.math.sin([x])
+        },
+        "cos": {
+          "@desc": "cosine of x",
+          "@examples": ["cos(2)"],
+          map: (x) => B13.core.math.cos([x])
+        },
+        "tan": {
+          "@desc": "tangent of x",
+          "@examples": ["tan(2)"],
+          map: (x) => B13.core.math.tan([x])
+        },
+        "atan": {
+          "@desc": "arctangent of x",
+          "@examples": ["atan(2)"],
+          map: (x) => B13.core.math.atan([x])
+        },
+        "asin": {
+          "@desc": "arcsin of x",
+          "@examples": ["asin(2)"],
+          map: (x) => B13.core.math.asin([x])
+        },
+        "acos": {
+          "@desc": "arccos of x",
+          "@examples": ["acos(2)"],
+          map: (x) => B13.core.math.acos([x])
+        },
+        "sinh": {
+          "@desc": "hyperbolic sine of x",
+          "@examples": ["sinh(2)"],
+          map: (x) => B13.core.math.sinh([x])
+        },
+        "cosh": {
+          "@desc": "hyperbolic cosine of x",
+          "@examples": ["cosh(2)"],
+          map: (x) => B13.core.math.cosh([x])
+        },
+        "tanh": {
+          "@desc": "hyperbolic tangent of x",
+          "@examples": ["tanh(2)"],
+          map: (x) => B13.core.math.tanh([x])
+        },
+        "exp": {
+          "@desc": "e to the power x",
+          "@examples": ["exp(2)"],
+          map: (x) => B13.core.math.exp([x])
+        },
+        "log": {
+          "@desc": "natural log of x",
+          "@examples": ["log(2)"],
+          map: (x) => B13.core.math.log([x])
+        },
+        "log10": {
+          "@desc": "log base 10 of x",
+          "@examples": ["log10(2)"],
+          map: (x) => B13.core.math.log10([x])
+        }
+      };
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/vmd/parser.js
+  var B14, valueOperators2, lang3, transpiler3;
+  var init_parser7 = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/vmd/parser.js"() {
+      init_monadic_parser();
+      init_helper();
+      init_builder();
+      init_properties5();
+      init_operators3();
+      init_keywords3();
+      init_functions();
+      B14 = MolScriptBuilder;
+      valueOperators2 = [
+        {
+          "@desc": "multiplication, division",
+          "@examples": [],
+          name: "mul-div",
+          type: binaryLeft,
+          rule: MonadicParser.regexp(/\s*(\*|\/)\s*/, 1),
+          map: (op2, e1, e2) => {
+            switch (op2) {
+              case "*":
+                return B14.core.math.mult([e1, e2]);
+              case "/":
+                return B14.core.math.div([e1, e2]);
+              default:
+                throw new Error(`value operator '${op2}' not supported`);
+            }
+          }
+        },
+        {
+          "@desc": "addition, substraction",
+          "@examples": [],
+          name: "add-sub",
+          type: binaryLeft,
+          rule: MonadicParser.regexp(/\s*(-|\+)\s*/, 1),
+          map: (op2, e1, e2) => {
+            switch (op2) {
+              case "-":
+                return B14.core.math.sub([e1, e2]);
+              case "+":
+                return B14.core.math.add([e1, e2]);
+              default:
+                throw new Error(`value operator '${op2}' not supported`);
+            }
+          }
+        },
+        {
+          "@desc": "value comparisons",
+          "@examples": [],
+          name: "comparison",
+          type: binaryLeft,
+          rule: MonadicParser.alt(MonadicParser.regexp(/\s*(=~|==|>=|<=|=|!=|>|<)\s*/, 1), MonadicParser.whitespace.result("=")),
+          map: (op2, e1, e2) => {
+            let expr;
+            if (e1.head !== void 0) {
+              if (e1.head.name === "structure-query.atom-property.macromolecular.secondary-structure-flags") {
+                expr = B14.core.flags.hasAny([e1, sstrucMap(e2)]);
+              }
+              if (e1.head.name === "core.type.regex") {
+                expr = B14.core.str.match([e1, B14.core.type.str([e2])]);
+              }
+            } else if (e2.head !== void 0) {
+              if (e2.head.name === "structure-query.atom-property.macromolecular.secondary-structure-flags") {
+                expr = B14.core.flags.hasAny([e2, sstrucMap(e1)]);
+              }
+              if (e2.head.name === "core.type.regex") {
+                expr = B14.core.str.match([e2, B14.core.type.str([e1])]);
+              }
+            } else if (op2 === "=~") {
+              if (e1.head) {
+                expr = B14.core.str.match([
+                  B14.core.type.regex([`^${e2}$`, "i"]),
+                  B14.core.type.str([e1])
+                ]);
+              } else {
+                expr = B14.core.str.match([
+                  B14.core.type.regex([`^${e1}$`, "i"]),
+                  B14.core.type.str([e2])
+                ]);
+              }
+            }
+            if (!expr) {
+              if (e1.head)
+                e2 = wrapValue(e1, e2);
+              if (e2.head)
+                e1 = wrapValue(e2, e1);
+              switch (op2) {
+                case "=":
+                case "==":
+                  expr = B14.core.rel.eq([e1, e2]);
+                  break;
+                case "!=":
+                  expr = B14.core.rel.neq([e1, e2]);
+                  break;
+                case ">":
+                  expr = B14.core.rel.gr([e1, e2]);
+                  break;
+                case "<":
+                  expr = B14.core.rel.lt([e1, e2]);
+                  break;
+                case ">=":
+                  expr = B14.core.rel.gre([e1, e2]);
+                  break;
+                case "<=":
+                  expr = B14.core.rel.lte([e1, e2]);
+                  break;
+                default:
+                  throw new Error(`value operator '${op2}' not supported`);
+              }
+            }
+            return B14.struct.generator.atomGroups({ "atom-test": expr });
+          }
+        }
+      ];
+      lang3 = MonadicParser.createLanguage({
+        Parens: function(r) {
+          return MonadicParser.alt(r.Parens, r.Operator, r.Expression).wrap(MonadicParser.string("("), MonadicParser.string(")"));
+        },
+        Expression: function(r) {
+          return MonadicParser.alt(
+            r.RangeListProperty,
+            //	    r.NamedAtomProperties,
+            r.ValueQuery,
+            r.Keywords
+          );
+        },
+        NamedAtomProperties: function() {
+          return MonadicParser.alt(...getNamedPropertyRules(properties3));
+        },
+        Keywords: () => MonadicParser.alt(...getKeywordRules(keywords3)),
+        ValueRange: function(r) {
+          return MonadicParser.seq(r.Value.skip(MonadicParser.regexp(/\s+TO\s+/i)), r.Value).map((x) => ({ range: x }));
+        },
+        RangeListProperty: function(r) {
+          return MonadicParser.seq(MonadicParser.alt(...getPropertyNameRules(properties3, /\s/)).skip(MonadicParser.whitespace), MonadicParser.alt(r.ValueRange, r.Value).sepBy1(MonadicParser.whitespace)).map((x) => {
+            const [property2, values2] = x;
+            const listValues = [];
+            const rangeValues = [];
+            values2.forEach((v2) => {
+              if (v2.range) {
+                rangeValues.push(B14.core.rel.inRange([property2, v2.range[0], v2.range[1]]));
+              } else {
+                listValues.push(wrapValue(property2, v2, sstrucDict2));
+              }
+            });
+            const rangeTest = orExpr(rangeValues);
+            const listTest = valuesTest(property2, listValues);
+            let test;
+            if (rangeTest && listTest) {
+              test = B14.core.logic.or([rangeTest, listTest]);
+            } else {
+              test = rangeTest ? rangeTest : listTest;
+            }
+            return B14.struct.generator.atomGroups({ [testLevel(property2)]: test });
+          });
+        },
+        Operator: function(r) {
+          return combineOperators(operators3, MonadicParser.alt(r.Parens, r.Expression, r.ValueQuery));
+        },
+        Query: function(r) {
+          return MonadicParser.alt(r.Operator, r.Parens, r.Expression).trim(MonadicParser.optWhitespace);
+        },
+        Number: function() {
+          return MonadicParser.regexp(/-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?/).map(Number).desc("number");
+        },
+        String: function() {
+          const w = getReservedWords(properties3, keywords3, operators3).sort(strLenSortFn).map(escapeRegExp).join("|");
+          return MonadicParser.alt(MonadicParser.regexp(new RegExp(`(?!(${w}))[A-Z0-9_]+`, "i")), MonadicParser.regexp(/'((?:[^"\\]|\\.)*)'/, 1), MonadicParser.regexp(/"((?:[^"\\]|\\.)*)"/, 1).map((x) => B14.core.type.regex([`^${x}$`, "i"]))).desc("string");
+        },
+        Value: function(r) {
+          return MonadicParser.alt(r.Number, r.String);
+        },
+        ValueParens: function(r) {
+          return MonadicParser.alt(r.ValueParens, r.ValueOperator, r.ValueExpressions).wrap(MonadicParser.string("("), MonadicParser.string(")"));
+        },
+        ValuePropertyNames: function() {
+          return MonadicParser.alt(...getPropertyNameRules(properties3, /=~|==|>=|<=|=|!=|>|<|\)|\s|\+|-|\*|\//i));
+        },
+        ValueOperator: function(r) {
+          return combineOperators(valueOperators2, MonadicParser.alt(r.ValueParens, r.ValueExpressions));
+        },
+        ValueExpressions: function(r) {
+          return MonadicParser.alt(r.ValueFunctions, r.Value, r.ValuePropertyNames);
+        },
+        ValueFunctions: function(r) {
+          return MonadicParser.alt(...getFunctionRules(functions, r.ValueOperator));
+        },
+        ValueQuery: function(r) {
+          return MonadicParser.alt(r.ValueOperator.map((x) => {
+            if (!x.head.name || !x.head.name.startsWith("structure-query.generator")) {
+              throw new Error(`values must be part of an comparison, value '${x}'`);
+            } else {
+              return x;
+            }
+          }));
+        }
+      });
+      transpiler3 = (str11) => lang3.Query.tryParse(str11);
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpilers/all.js
+  var _transpiler;
+  var init_all = __esm({
+    "node_modules/molstar/lib/mol-script/transpilers/all.js"() {
+      init_parser5();
+      init_parser6();
+      init_parser7();
+      _transpiler = {
+        pymol: transpiler2,
+        vmd: transpiler3,
+        jmol: transpiler
+      };
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/transpile.js
+  function parse2(lang4, str11) {
+    try {
+      const query2 = transpiler4[lang4](str11);
+      return query2;
+    } catch (e) {
+      console.error(e.message);
+      throw e;
+    }
+  }
+  var transpiler4;
+  var init_transpile = __esm({
+    "node_modules/molstar/lib/mol-script/transpile.js"() {
+      init_all();
+      transpiler4 = _transpiler;
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/runtime/query/table.js
+  function atomProp2(p3) {
+    return (ctx, xs) => p3(xs && xs[0] && xs[0](ctx) || ctx.element);
+  }
+  function bondFlag(current2, f) {
+    return current2 | (BondType.isName(f) ? BondType.fromName(f) : BondType.Flag.None);
+  }
+  function secondaryStructureFlag(current2, f) {
+    switch (f.toLowerCase()) {
+      case "helix":
+        return current2 | SecondaryStructureType.Flag.Helix;
+      case "alpha":
+        return current2 | SecondaryStructureType.Flag.Helix | SecondaryStructureType.Flag.HelixAlpha;
+      case "pi":
+        return current2 | SecondaryStructureType.Flag.Helix | SecondaryStructureType.Flag.HelixPi;
+      case "310":
+        return current2 | SecondaryStructureType.Flag.Helix | SecondaryStructureType.Flag.Helix3Ten;
+      case "beta":
+        return current2 | SecondaryStructureType.Flag.Beta;
+      case "strand":
+        return current2 | SecondaryStructureType.Flag.Beta | SecondaryStructureType.Flag.BetaStrand;
+      case "sheet":
+        return current2 | SecondaryStructureType.Flag.Beta | SecondaryStructureType.Flag.BetaSheet;
+      case "turn":
+        return current2 | SecondaryStructureType.Flag.Turn;
+      case "bend":
+        return current2 | SecondaryStructureType.Flag.Bend;
+      case "coil":
+        return current2 | SecondaryStructureType.Flag.NA;
+      default:
+        return current2;
+    }
+  }
+  function getArray(ctx, xs) {
+    const ret = [];
+    if (!xs)
+      return ret;
+    if (typeof xs.length === "number") {
+      for (let i = 0, _i = xs.length; i < _i; i++)
+        ret.push(xs[i](ctx));
+    } else {
+      const keys2 = Object.keys(xs);
+      for (let i = 1, _i = keys2.length; i < _i; i++)
+        ret.push(xs[keys2[i]](ctx));
+    }
+    return ret;
+  }
+  var C3, D, symbols;
+  var init_table2 = __esm({
+    "node_modules/molstar/lib/mol-script/runtime/query/table.js"() {
+      init_symbol_table();
+      init_base();
+      init_structure3();
+      init_types();
+      init_set();
+      init_string();
+      init_atomic();
+      init_hash_functions();
+      init_internal2();
+      init_array();
+      C3 = QuerySymbolRuntime.Const;
+      D = QuerySymbolRuntime.Dynamic;
+      symbols = [
+        // ============= TYPES =============
+        C3(MolScriptSymbolTable.core.type.bool, function core_type_bool(ctx, v2) {
+          return !!v2[0](ctx);
+        }),
+        C3(MolScriptSymbolTable.core.type.num, function core_type_num(ctx, v2) {
+          return +v2[0](ctx);
+        }),
+        C3(MolScriptSymbolTable.core.type.str, function core_type_str(ctx, v2) {
+          return "" + v2[0](ctx);
+        }),
+        C3(MolScriptSymbolTable.core.type.list, function core_type_list(ctx, xs) {
+          return QueryRuntimeArguments.forEachEval(xs, ctx, (v2, i, list3) => list3[i] = v2, []);
+        }),
+        C3(MolScriptSymbolTable.core.type.set, function core_type_set(ctx, xs) {
+          return QueryRuntimeArguments.forEachEval(xs, ctx, function core_type_set_argEval(v2, i, set4) {
+            return set4.add(v2);
+          }, /* @__PURE__ */ new Set());
+        }),
+        C3(MolScriptSymbolTable.core.type.regex, function core_type_regex(ctx, v2) {
+          return new RegExp(v2[0](ctx), v2[1] && v2[1](ctx) || "");
+        }),
+        C3(MolScriptSymbolTable.core.type.bitflags, function core_type_bitflags(ctx, v2) {
+          return +v2[0](ctx);
+        }),
+        C3(MolScriptSymbolTable.core.type.compositeKey, function core_type_compositeKey(ctx, xs) {
+          return QueryRuntimeArguments.forEachEval(xs, ctx, (v2, i, list3) => list3[i] = "" + v2, []).join("-");
+        }),
+        // ============= LOGIC ================
+        C3(MolScriptSymbolTable.core.logic.not, (ctx, v2) => !v2[0](ctx)),
+        C3(MolScriptSymbolTable.core.logic.and, (ctx, xs) => {
+          if (typeof xs.length === "number") {
+            for (let i = 0, _i = xs.length; i < _i; i++)
+              if (!xs[i](ctx))
+                return false;
+          } else {
+            for (const k of Object.keys(xs))
+              if (!xs[k](ctx))
+                return false;
+          }
+          return true;
+        }),
+        C3(MolScriptSymbolTable.core.logic.or, (ctx, xs) => {
+          if (typeof xs.length === "number") {
+            for (let i = 0, _i = xs.length; i < _i; i++)
+              if (xs[i](ctx))
+                return true;
+          } else {
+            for (const k of Object.keys(xs))
+              if (xs[k](ctx))
+                return true;
+          }
+          return false;
+        }),
+        // ============= RELATIONAL ================
+        C3(MolScriptSymbolTable.core.rel.eq, (ctx, v2) => v2[0](ctx) === v2[1](ctx)),
+        C3(MolScriptSymbolTable.core.rel.neq, (ctx, v2) => v2[0](ctx) !== v2[1](ctx)),
+        C3(MolScriptSymbolTable.core.rel.lt, (ctx, v2) => v2[0](ctx) < v2[1](ctx)),
+        C3(MolScriptSymbolTable.core.rel.lte, (ctx, v2) => v2[0](ctx) <= v2[1](ctx)),
+        C3(MolScriptSymbolTable.core.rel.gr, (ctx, v2) => v2[0](ctx) > v2[1](ctx)),
+        C3(MolScriptSymbolTable.core.rel.gre, (ctx, v2) => v2[0](ctx) >= v2[1](ctx)),
+        C3(MolScriptSymbolTable.core.rel.inRange, (ctx, v2) => {
+          const x = v2[0](ctx);
+          return x >= v2[1](ctx) && x <= v2[2](ctx);
+        }),
+        // ============= ARITHMETIC ================
+        C3(MolScriptSymbolTable.core.math.add, (ctx, xs) => {
+          let ret = 0;
+          if (typeof xs.length === "number") {
+            for (let i = 0, _i = xs.length; i < _i; i++)
+              ret += xs[i](ctx);
+          } else {
+            for (const k of Object.keys(xs))
+              ret += xs[k](ctx);
+          }
+          return ret;
+        }),
+        C3(MolScriptSymbolTable.core.math.sub, (ctx, xs) => {
+          let ret = 0;
+          if (typeof xs.length === "number") {
+            if (xs.length === 1)
+              return -xs[0](ctx);
+            ret = xs[0](ctx) || 0;
+            for (let i = 1, _i = xs.length; i < _i; i++)
+              ret -= xs[i](ctx);
+          } else {
+            const keys2 = Object.keys(xs);
+            if (keys2.length === 1)
+              return -xs[keys2[0]](ctx);
+            ret = xs[keys2[0]](ctx) || 0;
+            for (let i = 1, _i = keys2.length; i < _i; i++)
+              ret -= xs[keys2[i]](ctx);
+          }
+          return ret;
+        }),
+        C3(MolScriptSymbolTable.core.math.mult, (ctx, xs) => {
+          let ret = 1;
+          if (typeof xs.length === "number") {
+            for (let i = 0, _i = xs.length; i < _i; i++)
+              ret *= xs[i](ctx);
+          } else {
+            for (const k of Object.keys(xs))
+              ret *= xs[k](ctx);
+          }
+          return ret;
+        }),
+        C3(MolScriptSymbolTable.core.math.div, (ctx, v2) => v2[0](ctx) / v2[1](ctx)),
+        C3(MolScriptSymbolTable.core.math.pow, (ctx, v2) => Math.pow(v2[0](ctx), v2[1](ctx))),
+        C3(MolScriptSymbolTable.core.math.mod, (ctx, v2) => v2[0](ctx) % v2[1](ctx)),
+        C3(MolScriptSymbolTable.core.math.min, (ctx, xs) => {
+          let ret = Number.POSITIVE_INFINITY;
+          if (typeof xs.length === "number") {
+            for (let i = 0, _i = xs.length; i < _i; i++)
+              ret = Math.min(xs[i](ctx), ret);
+          } else {
+            for (const k of Object.keys(xs))
+              ret = Math.min(xs[k](ctx), ret);
+          }
+          return ret;
+        }),
+        C3(MolScriptSymbolTable.core.math.max, (ctx, xs) => {
+          let ret = Number.NEGATIVE_INFINITY;
+          if (typeof xs.length === "number") {
+            for (let i = 0, _i = xs.length; i < _i; i++)
+              ret = Math.max(xs[i](ctx), ret);
+          } else {
+            for (const k of Object.keys(xs))
+              ret = Math.max(xs[k](ctx), ret);
+          }
+          return ret;
+        }),
+        C3(MolScriptSymbolTable.core.math.cantorPairing, (ctx, v2) => cantorPairing(v2[0](ctx), v2[1](ctx))),
+        C3(MolScriptSymbolTable.core.math.sortedCantorPairing, (ctx, v2) => sortedCantorPairing(v2[0](ctx), v2[1](ctx))),
+        C3(MolScriptSymbolTable.core.math.invertCantorPairing, (ctx, v2) => invertCantorPairing([0, 0], v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.floor, (ctx, v2) => Math.floor(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.ceil, (ctx, v2) => Math.ceil(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.roundInt, (ctx, v2) => Math.round(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.trunc, (ctx, v2) => Math.trunc(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.abs, (ctx, v2) => Math.abs(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.sign, (ctx, v2) => Math.sign(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.sqrt, (ctx, v2) => Math.sqrt(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.cbrt, (ctx, v2) => Math.cbrt(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.sin, (ctx, v2) => Math.sin(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.cos, (ctx, v2) => Math.cos(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.tan, (ctx, v2) => Math.tan(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.asin, (ctx, v2) => Math.asin(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.acos, (ctx, v2) => Math.acos(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.atan, (ctx, v2) => Math.atan(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.sinh, (ctx, v2) => Math.sinh(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.cosh, (ctx, v2) => Math.cosh(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.tanh, (ctx, v2) => Math.tanh(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.exp, (ctx, v2) => Math.exp(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.log, (ctx, v2) => Math.log(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.log10, (ctx, v2) => Math.log10(v2[0](ctx))),
+        C3(MolScriptSymbolTable.core.math.atan2, (ctx, v2) => Math.atan2(v2[0](ctx), v2[1](ctx))),
+        // ============= STRING ================
+        C3(MolScriptSymbolTable.core.str.match, (ctx, v2) => v2[0](ctx).test(v2[1](ctx))),
+        C3(MolScriptSymbolTable.core.str.concat, (ctx, xs) => {
+          const ret = [];
+          if (typeof xs.length === "number") {
+            for (let i = 0, _i = xs.length; i < _i; i++)
+              ret.push(xs[i](ctx).toString());
+          } else {
+            for (const k of Object.keys(xs))
+              ret.push(xs[k](ctx).toString());
+          }
+          return ret.join("");
+        }),
+        // ============= LIST ================
+        C3(MolScriptSymbolTable.core.list.getAt, (ctx, v2) => v2[0](ctx)[v2[1](ctx)]),
+        C3(MolScriptSymbolTable.core.list.equal, (ctx, v2) => arrayEqual2(v2[0](ctx), v2[1](ctx))),
+        // ============= SET ================
+        C3(MolScriptSymbolTable.core.set.has, function core_set_has(ctx, v2) {
+          return v2[0](ctx).has(v2[1](ctx));
+        }),
+        C3(MolScriptSymbolTable.core.set.isSubset, function core_set_isSubset(ctx, v2) {
+          return SetUtils.isSuperset(v2[1](ctx), v2[0](ctx));
+        }),
+        // ============= FLAGS ================
+        C3(MolScriptSymbolTable.core.flags.hasAny, (ctx, v2) => {
+          const test = v2[1](ctx);
+          const tested = v2[0](ctx);
+          if (!test)
+            return !!tested;
+          return (tested & test) !== 0;
+        }),
+        C3(MolScriptSymbolTable.core.flags.hasAll, (ctx, v2) => {
+          const test = v2[1](ctx);
+          const tested = v2[0](ctx);
+          if (!test)
+            return !tested;
+          return (tested & test) === test;
+        }),
+        // Structure
+        // ============= TYPES ================
+        C3(MolScriptSymbolTable.structureQuery.type.elementSymbol, (ctx, v2) => ElementSymbol(v2[0](ctx))),
+        C3(MolScriptSymbolTable.structureQuery.type.atomName, (ctx, v2) => upperCaseAny(v2[0](ctx))),
+        C3(MolScriptSymbolTable.structureQuery.type.bondFlags, (ctx, xs) => {
+          let ret = BondType.Flag.None;
+          if (typeof xs.length === "number") {
+            for (let i = 0, _i = xs.length; i < _i; i++)
+              ret = bondFlag(ret, xs[i](ctx));
+          } else {
+            for (const k of Object.keys(xs))
+              ret = bondFlag(ret, xs[k](ctx));
+          }
+          return ret;
+        }),
+        C3(MolScriptSymbolTable.structureQuery.type.ringFingerprint, (ctx, xs) => UnitRing.elementFingerprint(getArray(ctx, xs))),
+        C3(MolScriptSymbolTable.structureQuery.type.secondaryStructureFlags, (ctx, xs) => {
+          let ret = SecondaryStructureType.Flag.None;
+          if (typeof xs.length === "number") {
+            for (let i = 0, _i = xs.length; i < _i; i++)
+              ret = secondaryStructureFlag(ret, xs[i](ctx));
+          } else {
+            for (const k of Object.keys(xs))
+              ret = secondaryStructureFlag(ret, xs[k](ctx));
+          }
+          return ret;
+        }),
+        // TODO:
+        // C(MolScript.structureQuery.type.entityType, (ctx, v) => StructureRuntime.Common.entityType(v[0](ctx))),
+        // C(MolScript.structureQuery.type.authResidueId, (ctx, v) => ResidueIdentifier.auth(v[0](ctx), v[1](ctx), v[2] && v[2](ctx))),
+        // C(MolScript.structureQuery.type.labelResidueId, (ctx, v) => ResidueIdentifier.label(v[0](ctx), v[1](ctx), v[2](ctx), v[3] && v[3](ctx))),
+        // ============= SLOTS ================
+        // TODO: slots might not be needed after all: reducer simply pushes/pops current element
+        // C(MolScript.structureQuery.slot.element, (ctx, _) => ctx_.element),
+        // C(MolScript.structureQuery.slot.elementSetReduce, (ctx, _) => ctx_.element),
+        // ============= FILTERS ================
+        D(MolScriptSymbolTable.structureQuery.filter.pick, (ctx, xs) => Queries.filters.pick(xs[0], xs["test"])(ctx)),
+        D(MolScriptSymbolTable.structureQuery.filter.first, (ctx, xs) => Queries.filters.first(xs[0])(ctx)),
+        D(MolScriptSymbolTable.structureQuery.filter.withSameAtomProperties, (ctx, xs) => Queries.filters.withSameAtomProperties(xs[0], xs["source"], xs["property"])(ctx)),
+        D(MolScriptSymbolTable.structureQuery.filter.intersectedBy, (ctx, xs) => Queries.filters.areIntersectedBy(xs[0], xs["by"])(ctx)),
+        D(MolScriptSymbolTable.structureQuery.filter.within, (ctx, xs) => {
+          var _a, _b, _c;
+          return Queries.filters.within({
+            query: xs[0],
+            target: xs["target"],
+            minRadius: (_a = xs["min-radius"]) === null || _a === void 0 ? void 0 : _a.call(xs, ctx),
+            maxRadius: (_b = xs["max-radius"]) === null || _b === void 0 ? void 0 : _b.call(xs, ctx),
+            elementRadius: xs["atom-radius"],
+            invert: (_c = xs["invert"]) === null || _c === void 0 ? void 0 : _c.call(xs, ctx)
+          })(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.filter.isConnectedTo, (ctx, xs) => {
+          var _a, _b;
+          return Queries.filters.isConnectedTo({
+            query: xs[0],
+            target: xs["target"],
+            disjunct: (_a = xs["disjunct"]) === null || _a === void 0 ? void 0 : _a.call(xs, ctx),
+            invert: (_b = xs["invert"]) === null || _b === void 0 ? void 0 : _b.call(xs, ctx),
+            bondTest: xs["bond-test"]
+          })(ctx);
+        }),
+        // ============= GENERATORS ================
+        D(MolScriptSymbolTable.structureQuery.generator.atomGroups, function structureQuery_generator_atomGroups(ctx, xs) {
+          return Queries.generators.atoms({
+            entityTest: xs["entity-test"],
+            chainTest: xs["chain-test"],
+            residueTest: xs["residue-test"],
+            atomTest: xs["atom-test"],
+            groupBy: xs["group-by"]
+          })(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.generator.all, function structureQuery_generator_all(ctx) {
+          return Queries.generators.all(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.generator.empty, function structureQuery_generator_empty(ctx) {
+          return Queries.generators.none(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.generator.bondedAtomicPairs, function structureQuery_generator_bondedAtomicPairs(ctx, xs) {
+          return Queries.generators.bondedAtomicPairs(xs && xs[0])(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.generator.rings, function structureQuery_generator_rings(ctx, xs) {
+          var _a, _b;
+          return Queries.generators.rings((_a = xs === null || xs === void 0 ? void 0 : xs["fingerprint"]) === null || _a === void 0 ? void 0 : _a.call(xs, ctx), (_b = xs === null || xs === void 0 ? void 0 : xs["only-aromatic"]) === null || _b === void 0 ? void 0 : _b.call(xs, ctx))(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.generator.queryInSelection, function structureQuery_generator_queryInSelection(ctx, xs) {
+          var _a;
+          return Queries.generators.querySelection(xs[0], xs["query"], (_a = xs["in-complement"]) === null || _a === void 0 ? void 0 : _a.call(xs, ctx))(ctx);
+        }),
+        // ============= MODIFIERS ================
+        D(MolScriptSymbolTable.structureQuery.modifier.includeSurroundings, function structureQuery_modifier_includeSurroundings(ctx, xs) {
+          return Queries.modifiers.includeSurroundings(xs[0], {
+            radius: xs["radius"](ctx),
+            wholeResidues: !!(xs["as-whole-residues"] && xs["as-whole-residues"](ctx)),
+            elementRadius: xs["atom-radius"]
+          })(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.modifier.surroundingLigands, function structureQuery_modifier_includeSurroundingLigands(ctx, xs) {
+          return Queries.modifiers.surroundingLigands({
+            query: xs[0],
+            radius: xs["radius"](ctx),
+            includeWater: !!(xs["include-water"] && xs["include-water"](ctx))
+          })(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.modifier.wholeResidues, function structureQuery_modifier_wholeResidues(ctx, xs) {
+          return Queries.modifiers.wholeResidues(xs[0])(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.modifier.union, function structureQuery_modifier_union(ctx, xs) {
+          return Queries.modifiers.union(xs[0])(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.modifier.expandProperty, function structureQuery_modifier_expandProperty(ctx, xs) {
+          return Queries.modifiers.expandProperty(xs[0], xs["property"])(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.modifier.exceptBy, function structureQuery_modifier_exceptBy(ctx, xs) {
+          return Queries.modifiers.exceptBy(xs[0], xs["by"])(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.modifier.includeConnected, function structureQuery_modifier_includeConnected(ctx, xs) {
+          var _a, _b;
+          return Queries.modifiers.includeConnected({
+            query: xs[0],
+            bondTest: xs["bond-test"],
+            wholeResidues: !!(xs["as-whole-residues"] && xs["as-whole-residues"](ctx)),
+            layerCount: xs["layer-count"] && xs["layer-count"](ctx) || 1,
+            fixedPoint: (_b = (_a = xs["fixed-point"]) === null || _a === void 0 ? void 0 : _a.call(xs, ctx)) !== null && _b !== void 0 ? _b : false
+          })(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.modifier.intersectBy, function structureQuery_modifier_intersectBy(ctx, xs) {
+          return Queries.modifiers.intersectBy(xs[0], xs["by"])(ctx);
+        }),
+        // ============= COMBINATORS ================
+        D(MolScriptSymbolTable.structureQuery.combinator.merge, (ctx, xs) => Queries.combinators.merge(xs)(ctx)),
+        // ============= ATOM PROPERTIES ================
+        // ~~~ CORE ~~~
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.elementSymbol, atomProp2(StructureProperties.atom.type_symbol)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.vdw, (ctx, xs) => VdwRadius(StructureProperties.atom.type_symbol(xs && xs[0] && xs[0](ctx) || ctx.element))),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.mass, (ctx, xs) => AtomWeight(StructureProperties.atom.type_symbol(xs && xs[0] && xs[0](ctx) || ctx.element))),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.atomicNumber, (ctx, xs) => AtomNumber(StructureProperties.atom.type_symbol(xs && xs[0] && xs[0](ctx) || ctx.element))),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.x, atomProp2(StructureProperties.atom.x)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.y, atomProp2(StructureProperties.atom.y)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.z, atomProp2(StructureProperties.atom.z)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.sourceIndex, atomProp2(StructureProperties.atom.sourceIndex)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.operatorName, atomProp2(StructureProperties.unit.operator_name)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.instanceId, atomProp2(StructureProperties.unit.instance_id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.operatorKey, atomProp2(StructureProperties.unit.operator_key)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.modelIndex, atomProp2(StructureProperties.unit.model_index)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.modelLabel, atomProp2(StructureProperties.unit.model_label)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.modelEntryId, atomProp2(StructureProperties.unit.model_entry_id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.core.atomKey, (ctx, xs) => {
+          const e = xs && xs[0] && xs[0](ctx) || ctx.element;
+          return cantorPairing(e.unit.id, e.element);
+        }),
+        // TODO:
+        // D(MolScript.structureQuery.atomProperty.core.bondCount, (ctx, _) => ),
+        // ~~~ TOPOLOGY ~~~
+        // TODO
+        // ~~~ MACROMOLECULAR ~~~
+        // TODO:
+        // // identifiers
+        // labelResidueId: prop((env, v) => ResidueIdentifier.labelOfResidueIndex(env.context.model, getAddress(env, v).residue)),
+        // authResidueId: prop((env, v) => ResidueIdentifier.authOfResidueIndex(env.context.model, getAddress(env, v).residue)),
+        // keys
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.residueKey, (ctx, xs) => element_exports.residueIndex(xs && xs[0] && xs[0](ctx) || ctx.element)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.chainKey, (ctx, xs) => element_exports.chainIndex(xs && xs[0] && xs[0](ctx) || ctx.element)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityKey, (ctx, xs) => element_exports.entityIndex(xs && xs[0] && xs[0](ctx) || ctx.element)),
+        // mmCIF
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.id, atomProp2(StructureProperties.atom.id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.isHet, (ctx, xs) => StructureProperties.residue.group_PDB(xs && xs[0] && xs[0](ctx) || ctx.element) !== "ATOM"),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_atom_id, atomProp2(StructureProperties.atom.label_atom_id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_alt_id, atomProp2(StructureProperties.atom.label_alt_id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_comp_id, atomProp2(StructureProperties.atom.label_comp_id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_seq_id, atomProp2(StructureProperties.residue.label_seq_id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_asym_id, atomProp2(StructureProperties.chain.label_asym_id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_entity_id, atomProp2(StructureProperties.entity.id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_atom_id, atomProp2(StructureProperties.atom.auth_atom_id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_comp_id, atomProp2(StructureProperties.atom.auth_comp_id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_seq_id, atomProp2(StructureProperties.residue.auth_seq_id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_asym_id, atomProp2(StructureProperties.chain.auth_asym_id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.pdbx_PDB_ins_code, atomProp2(StructureProperties.residue.pdbx_PDB_ins_code)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.pdbx_formal_charge, atomProp2(StructureProperties.atom.pdbx_formal_charge)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.occupancy, atomProp2(StructureProperties.atom.occupancy)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.B_iso_or_equiv, atomProp2(StructureProperties.atom.B_iso_or_equiv)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityType, atomProp2(StructureProperties.entity.type)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entitySubtype, atomProp2(StructureProperties.entity.subtype)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityPrdId, atomProp2(StructureProperties.entity.prd_id)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityDescription, atomProp2(StructureProperties.entity.pdbx_description)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.objectPrimitive, atomProp2(StructureProperties.unit.object_primitive)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.isNonStandard, atomProp2(StructureProperties.residue.isNonStandard)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.secondaryStructureKey, atomProp2(StructureProperties.residue.secondary_structure_key)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.secondaryStructureFlags, atomProp2(StructureProperties.residue.secondary_structure_type)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.chemCompType, atomProp2(StructureProperties.residue.chem_comp_type)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.residueSourceIndex, atomProp2(StructureProperties.residue.residueSourceIndex)),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.ihm.hasSeqId, function structureQuery_atomProperty_ihm_hasSeqId(ctx, xs) {
+          const current2 = ctx.element;
+          const seqId2 = xs && xs[0] && xs[0](ctx);
+          if (current2.unit.kind === Unit.Kind.Atomic) {
+            return seqId2 === StructureProperties.residue.label_seq_id(current2);
+          }
+          return seqId2 >= StructureProperties.coarse.seq_id_begin(current2) && seqId2 <= StructureProperties.coarse.seq_id_end(current2);
+        }),
+        D(MolScriptSymbolTable.structureQuery.atomProperty.ihm.overlapsSeqIdRange, function structureQuery_atomProperty_ihm_hasSeqId2(ctx, xs) {
+          var _a, _b;
+          const current2 = ctx.element;
+          const beg = (_a = xs && xs.beg && xs.beg(ctx)) !== null && _a !== void 0 ? _a : -Number.MAX_VALUE;
+          const end4 = (_b = xs && xs.end && xs.end(ctx)) !== null && _b !== void 0 ? _b : Number.MAX_VALUE;
+          if (current2.unit.kind === Unit.Kind.Atomic) {
+            const value = StructureProperties.residue.label_seq_id(current2);
+            return value >= beg && value <= end4;
+          }
+          const a5 = StructureProperties.coarse.seq_id_begin(current2);
+          const b5 = StructureProperties.coarse.seq_id_end(current2);
+          return a5 >= beg && a5 <= end4 || b5 >= beg && b5 <= end4 || a5 <= beg && b5 >= end4;
+        }),
+        // ============= ATOM SET ================
+        D(MolScriptSymbolTable.structureQuery.atomSet.atomCount, function structureQuery_atomset_atomCount(ctx, xs) {
+          return Queries.atomset.atomCount(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.atomSet.countQuery, function structureQuery_atomset_countQuery(ctx, xs) {
+          return Queries.atomset.countQuery(xs[0])(ctx);
+        }),
+        D(MolScriptSymbolTable.structureQuery.atomSet.propertySet, function structureQuery_atomset_propertySet(ctx, xs) {
+          return Queries.atomset.propertySet(xs[0])(ctx);
+        }),
+        // ============= BOND PROPERTIES ================
+        D(MolScriptSymbolTable.structureQuery.bondProperty.order, (ctx, xs) => ctx.atomicBond.order),
+        D(MolScriptSymbolTable.structureQuery.bondProperty.flags, (ctx, xs) => ctx.atomicBond.type),
+        D(MolScriptSymbolTable.structureQuery.bondProperty.key, (ctx, xs) => ctx.atomicBond.key),
+        D(MolScriptSymbolTable.structureQuery.bondProperty.atomA, (ctx, xs) => ctx.atomicBond.a),
+        D(MolScriptSymbolTable.structureQuery.bondProperty.atomB, (ctx, xs) => ctx.atomicBond.b),
+        D(MolScriptSymbolTable.structureQuery.bondProperty.length, (ctx, xs) => ctx.atomicBond.length),
+        // Internal
+        D(MolScriptSymbolTable.internal.generator.bundleElement, function internal_generator_bundleElement(ctx, xs) {
+          return bundleElementImpl(xs.groupedUnits(ctx), xs.ranges(ctx), xs.set(ctx));
+        }),
+        D(MolScriptSymbolTable.internal.generator.bundle, function internal_generator_bundle(ctx, xs) {
+          return bundleGenerator(xs.elements(ctx))(ctx);
+        }),
+        D(MolScriptSymbolTable.internal.generator.current, function internal_generator_current(ctx, xs) {
+          return ctx.tryGetCurrentSelection();
+        })
+      ];
+      (function() {
+        for (const s of symbols) {
+          DefaultQueryRuntimeTable.addSymbol(s);
+        }
+      })();
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/runtime/query/compiler.js
+  var init_compiler = __esm({
+    "node_modules/molstar/lib/mol-script/runtime/query/compiler.js"() {
+      init_base();
+      init_table2();
+    }
+  });
+
+  // node_modules/molstar/lib/mol-script/script.js
+  function ScriptImpl(expression, language) {
+    return { expression, language };
+  }
+  var init_script = __esm({
+    "node_modules/molstar/lib/mol-script/script.js"() {
+      init_symbols();
+      init_parser4();
+      init_transpile();
+      init_structure3();
+      init_compiler();
+      init_builder();
+      init_type_helpers();
+      (function(ScriptImpl2) {
+        ScriptImpl2.Info = {
+          "mol-script": "Mol-Script",
+          "pymol": "PyMOL",
+          "vmd": "VMD",
+          "jmol": "Jmol"
+        };
+        function is4(x) {
+          return !!x && typeof x.expression === "string" && !!x.language;
+        }
+        ScriptImpl2.is = is4;
+        function areEqual4(a5, b5) {
+          return a5.language === b5.language && a5.expression === b5.expression;
+        }
+        ScriptImpl2.areEqual = areEqual4;
+        function toExpression2(script) {
+          switch (script.language) {
+            case "mol-script":
+              const parsed = parseMolScript(script.expression);
+              if (parsed.length === 0)
+                throw new Error("No query");
+              return transpileMolScript(parsed[0]);
+            case "pymol":
+            case "jmol":
+            case "vmd":
+              return parse2(script.language, script.expression);
+            default:
+              assertUnreachable(script.language);
+          }
+        }
+        ScriptImpl2.toExpression = toExpression2;
+        function toQuery(script) {
+          const expression = toExpression2(script);
+          return compile(expression);
+        }
+        ScriptImpl2.toQuery = toQuery;
+        function toLoci2(script, structure) {
+          const query2 = toQuery(script);
+          const result2 = query2(new QueryContext(structure));
+          return StructureSelection.toLociWithSourceUnits(result2);
+        }
+        ScriptImpl2.toLoci = toLoci2;
+        function getStructureSelection(expr, structure, options) {
+          const e = typeof expr === "function" ? expr(MolScriptBuilder) : expr;
+          const query2 = compile(e);
+          return query2(new QueryContext(structure, options));
+        }
+        ScriptImpl2.getStructureSelection = getStructureSelection;
+      })(ScriptImpl || (ScriptImpl = {}));
+    }
+  });
+
+  // node_modules/molstar/lib/mol-util/color/names.js
+  var ColorNames, ColorNamesValueMap;
+  var init_names = __esm({
+    "node_modules/molstar/lib/mol-util/color/names.js"() {
+      init_color();
+      ColorNames = ColorMap({
+        aliceblue: 15792383,
+        antiquewhite: 16444375,
+        aqua: 65535,
+        aquamarine: 8388564,
+        azure: 15794175,
+        beige: 16119260,
+        bisque: 16770244,
+        black: 0,
+        blanchedalmond: 16772045,
+        blue: 255,
+        blueviolet: 9055202,
+        brown: 10824234,
+        burlywood: 14596231,
+        cadetblue: 6266528,
+        chartreuse: 8388352,
+        chocolate: 13789470,
+        coral: 16744272,
+        cornflower: 6591981,
+        cornflowerblue: 6591981,
+        cornsilk: 16775388,
+        crimson: 14423100,
+        cyan: 65535,
+        darkblue: 139,
+        darkcyan: 35723,
+        darkgoldenrod: 12092939,
+        darkgray: 11119017,
+        darkgreen: 25600,
+        darkgrey: 11119017,
+        darkkhaki: 12433259,
+        darkmagenta: 9109643,
+        darkolivegreen: 5597999,
+        darkorange: 16747520,
+        darkorchid: 10040012,
+        darkred: 9109504,
+        darksalmon: 15308410,
+        darkseagreen: 9419919,
+        darkslateblue: 4734347,
+        darkslategray: 3100495,
+        darkslategrey: 3100495,
+        darkturquoise: 52945,
+        darkviolet: 9699539,
+        deeppink: 16716947,
+        deepskyblue: 49151,
+        dimgray: 6908265,
+        dimgrey: 6908265,
+        dodgerblue: 2003199,
+        firebrick: 11674146,
+        floralwhite: 16775920,
+        forestgreen: 2263842,
+        fuchsia: 16711935,
+        gainsboro: 14474460,
+        ghostwhite: 16316671,
+        gold: 16766720,
+        goldenrod: 14329120,
+        gray: 8421504,
+        green: 32768,
+        greenyellow: 11403055,
+        grey: 8421504,
+        honeydew: 15794160,
+        hotpink: 16738740,
+        indianred: 13458524,
+        indigo: 4915330,
+        ivory: 16777200,
+        khaki: 15787660,
+        laserlemon: 16777044,
+        lavender: 15132410,
+        lavenderblush: 16773365,
+        lawngreen: 8190976,
+        lemonchiffon: 16775885,
+        lightblue: 11393254,
+        lightcoral: 15761536,
+        lightcyan: 14745599,
+        lightgoldenrod: 16448210,
+        lightgoldenrodyellow: 16448210,
+        lightgray: 13882323,
+        lightgreen: 9498256,
+        lightgrey: 13882323,
+        lightpink: 16758465,
+        lightsalmon: 16752762,
+        lightseagreen: 2142890,
+        lightskyblue: 8900346,
+        lightslategray: 7833753,
+        lightslategrey: 7833753,
+        lightsteelblue: 11584734,
+        lightyellow: 16777184,
+        lime: 65280,
+        limegreen: 3329330,
+        linen: 16445670,
+        magenta: 16711935,
+        maroon: 8388608,
+        maroon2: 8323072,
+        maroon3: 11546720,
+        mediumaquamarine: 6737322,
+        mediumblue: 205,
+        mediumorchid: 12211667,
+        mediumpurple: 9662683,
+        mediumseagreen: 3978097,
+        mediumslateblue: 8087790,
+        mediumspringgreen: 64154,
+        mediumturquoise: 4772300,
+        mediumvioletred: 13047173,
+        midnightblue: 1644912,
+        mintcream: 16121850,
+        mistyrose: 16770273,
+        moccasin: 16770229,
+        navajowhite: 16768685,
+        navy: 128,
+        oldlace: 16643558,
+        olive: 8421376,
+        olivedrab: 7048739,
+        orange: 16753920,
+        orangered: 16729344,
+        orchid: 14315734,
+        palegoldenrod: 15657130,
+        palegreen: 10025880,
+        paleturquoise: 11529966,
+        palevioletred: 14381203,
+        papayawhip: 16773077,
+        peachpuff: 16767673,
+        peru: 13468991,
+        pink: 16761035,
+        plum: 14524637,
+        powderblue: 11591910,
+        purple: 8388736,
+        purple2: 8323199,
+        purple3: 10494192,
+        rebeccapurple: 6697881,
+        red: 16711680,
+        rosybrown: 12357519,
+        royalblue: 4286945,
+        saddlebrown: 9127187,
+        salmon: 16416882,
+        sandybrown: 16032864,
+        seagreen: 3050327,
+        seashell: 16774638,
+        sienna: 10506797,
+        silver: 12632256,
+        skyblue: 8900331,
+        slateblue: 6970061,
+        slategray: 7372944,
+        slategrey: 7372944,
+        snow: 16775930,
+        springgreen: 65407,
+        steelblue: 4620980,
+        tan: 13808780,
+        teal: 32896,
+        thistle: 14204888,
+        tomato: 16737095,
+        turquoise: 4251856,
+        violet: 15631086,
+        wheat: 16113331,
+        white: 16777215,
+        whitesmoke: 16119285,
+        yellow: 16776960,
+        yellowgreen: 10145074
+      });
+      ColorNamesValueMap = (function() {
+        const map3 = /* @__PURE__ */ new Map();
+        Object.keys(ColorNames).forEach((name) => {
+          map3.set(ColorNames[name], name);
+        });
+        return map3;
+      })();
+    }
+  });
+
+  // node_modules/molstar/lib/mol-io/common/simple-buffer.js
+  var SimpleBuffer;
+  var init_simple_buffer = __esm({
+    "node_modules/molstar/lib/mol-io/common/simple-buffer.js"() {
+      init_mol_util();
+      (function(SimpleBuffer2) {
+        function fromUint8Array(array2) {
+          const dv = new DataView(array2.buffer);
+          return Object.assign(array2.subarray(0), {
+            readInt8: (offset2) => dv.getInt8(offset2),
+            readUInt8: (offset2) => dv.getUint8(offset2),
+            writeInt8: (value, offset2) => dv.setInt8(offset2, value),
+            writeUInt8: (value, offset2) => dv.setUint8(offset2, value),
+            readInt16LE: (offset2) => dv.getInt16(offset2, true),
+            readInt32LE: (offset2) => dv.getInt32(offset2, true),
+            readUInt16LE: (offset2) => dv.getUint16(offset2, true),
+            readUInt32LE: (offset2) => dv.getUint32(offset2, true),
+            readFloatLE: (offset2) => dv.getFloat32(offset2, true),
+            readDoubleLE: (offset2) => dv.getFloat64(offset2, true),
+            writeInt16LE: (value, offset2) => dv.setInt16(offset2, value, true),
+            writeInt32LE: (value, offset2) => dv.setInt32(offset2, value, true),
+            writeUInt16LE: (value, offset2) => dv.setUint16(offset2, value, true),
+            writeUInt32LE: (value, offset2) => dv.setUint32(offset2, value, true),
+            writeFloatLE: (value, offset2) => dv.setFloat32(offset2, value, true),
+            writeDoubleLE: (value, offset2) => dv.setFloat64(offset2, value, true),
+            readInt16BE: (offset2) => dv.getInt16(offset2, false),
+            readInt32BE: (offset2) => dv.getInt32(offset2, false),
+            readUInt16BE: (offset2) => dv.getUint16(offset2, false),
+            readUInt32BE: (offset2) => dv.getUint32(offset2, false),
+            readFloatBE: (offset2) => dv.getFloat32(offset2, false),
+            readDoubleBE: (offset2) => dv.getFloat64(offset2, false),
+            writeInt16BE: (value, offset2) => dv.setInt16(offset2, value, false),
+            writeInt32BE: (value, offset2) => dv.setInt32(offset2, value, false),
+            writeUInt16BE: (value, offset2) => dv.setUint16(offset2, value, false),
+            writeUInt32BE: (value, offset2) => dv.setUint32(offset2, value, false),
+            writeFloatBE: (value, offset2) => dv.setFloat32(offset2, value, false),
+            writeDoubleBE: (value, offset2) => dv.setFloat64(offset2, value, false),
+            copy: (targetBuffer, targetStart, sourceStart, sourceEnd) => {
+              targetStart = defaults(targetStart, 0);
+              sourceStart = defaults(sourceStart, 0);
+              sourceEnd = defaults(sourceEnd, array2.length);
+              targetBuffer.set(array2.subarray(sourceStart, sourceEnd), targetStart);
+              return sourceEnd - sourceStart;
+            }
+          });
+        }
+        SimpleBuffer2.fromUint8Array = fromUint8Array;
+        function fromArrayBuffer(arrayBuffer) {
+          return fromUint8Array(new Uint8Array(arrayBuffer));
+        }
+        SimpleBuffer2.fromArrayBuffer = fromArrayBuffer;
+        function fromBuffer(buffer) {
+          return buffer;
+        }
+        SimpleBuffer2.fromBuffer = fromBuffer;
+        SimpleBuffer2.IsNativeEndianLittle = new Uint16Array(new Uint8Array([18, 52]).buffer)[0] === 13330;
+        function flipByteOrder2(source, target, byteCount, elementByteSize, offset2) {
+          for (let i = 0, n = byteCount; i < n; i += elementByteSize) {
+            for (let j = 0; j < elementByteSize; j++) {
+              target[offset2 + i + elementByteSize - j - 1] = source[offset2 + i + j];
+            }
+          }
+        }
+        SimpleBuffer2.flipByteOrder = flipByteOrder2;
+        function flipByteOrderInPlace2(buffer, byteOffset = 0, length) {
+          const intView = new Int16Array(buffer, byteOffset, length);
+          for (let i = 0, n = intView.length; i < n; ++i) {
+            const val = intView[i];
+            intView[i] = (val & 255) << 8 | val >> 8 & 255;
+          }
+        }
+        SimpleBuffer2.flipByteOrderInPlace2 = flipByteOrderInPlace2;
+        function ensureLittleEndian(source, target, byteCount, elementByteSize, offset2) {
+          if (SimpleBuffer2.IsNativeEndianLittle)
+            return;
+          if (!byteCount || elementByteSize <= 1)
+            return;
+          flipByteOrder2(source, target, byteCount, elementByteSize, offset2);
+        }
+        SimpleBuffer2.ensureLittleEndian = ensureLittleEndian;
+      })(SimpleBuffer || (SimpleBuffer = {}));
+    }
+  });
+
+  // node_modules/molstar/lib/mol-io/common/file-handle.js
+  var FileHandle;
+  var init_file_handle = __esm({
+    "node_modules/molstar/lib/mol-io/common/file-handle.js"() {
+      init_mol_util();
+      init_simple_buffer();
+      (function(FileHandle2) {
+        function fromBuffer(buffer, name) {
+          return {
+            name,
+            readBuffer: (position, sizeOrBuffer, size4, byteOffset) => {
+              let bytesRead;
+              let outBuffer;
+              if (typeof sizeOrBuffer === "number") {
+                size4 = defaults(size4, sizeOrBuffer);
+                const start4 = position;
+                const end4 = Math.min(buffer.length, start4 + size4);
+                bytesRead = end4 - start4;
+                outBuffer = SimpleBuffer.fromUint8Array(new Uint8Array(buffer.buffer, start4, end4 - start4));
+              } else {
+                size4 = defaults(size4, sizeOrBuffer.length);
+                const start4 = position;
+                const end4 = Math.min(buffer.length, start4 + size4);
+                sizeOrBuffer.set(buffer.subarray(start4, end4), byteOffset);
+                bytesRead = end4 - start4;
+                outBuffer = sizeOrBuffer;
+              }
+              if (size4 !== bytesRead) {
+                console.warn(`byteCount ${size4} and bytesRead ${bytesRead} differ`);
+              }
+              return Promise.resolve({ bytesRead, buffer: outBuffer });
+            },
+            writeBuffer: (position, buffer2, length) => {
+              length = defaults(length, buffer2.length);
+              console.error(".writeBuffer not implemented for FileHandle.fromBuffer");
+              return Promise.resolve(0);
+            },
+            writeBufferSync: (position, buffer2, length) => {
+              length = defaults(length, buffer2.length);
+              console.error(".writeSync not implemented for FileHandle.fromBuffer");
+              return 0;
+            },
+            close: noop
+          };
+        }
+        FileHandle2.fromBuffer = fromBuffer;
+      })(FileHandle || (FileHandle = {}));
+    }
+  });
+
+  // node_modules/molstar/lib/mol-io/common/typed-array.js
+  function getElementByteSize(type3) {
+    if (type3 === TypedArrayValueType.Float32)
+      return 4;
+    if (type3 === TypedArrayValueType.Int16)
+      return 2;
+    if (type3 === TypedArrayValueType.Uint16)
+      return 2;
+    return 1;
+  }
+  function makeTypedArray(type3, buffer, byteOffset = 0, length) {
+    if (type3 === TypedArrayValueType.Float32)
+      return new Float32Array(buffer, byteOffset, length);
+    if (type3 === TypedArrayValueType.Int16)
+      return new Int16Array(buffer, byteOffset, length);
+    if (type3 === TypedArrayValueType.Uint16)
+      return new Uint16Array(buffer, byteOffset, length);
+    return new Int8Array(buffer, byteOffset, length);
+  }
+  function createTypedArrayBufferContext(size4, type3) {
+    const elementByteSize = getElementByteSize(type3);
+    const arrayBuffer = new ArrayBuffer(elementByteSize * size4);
+    const readBuffer = SimpleBuffer.fromArrayBuffer(arrayBuffer);
+    const valuesBuffer = SimpleBuffer.IsNativeEndianLittle ? arrayBuffer : new ArrayBuffer(elementByteSize * size4);
+    return {
+      type: type3,
+      elementByteSize,
+      readBuffer,
+      valuesBuffer: new Uint8Array(valuesBuffer),
+      values: makeTypedArray(type3, valuesBuffer)
+    };
+  }
+  async function readTypedArray(ctx, file, position, byteCount, valueByteOffset, littleEndian) {
+    await file.readBuffer(position, ctx.readBuffer, byteCount, valueByteOffset);
+    if (ctx.elementByteSize > 1 && (littleEndian !== void 0 && littleEndian !== SimpleBuffer.IsNativeEndianLittle || !SimpleBuffer.IsNativeEndianLittle)) {
+      SimpleBuffer.flipByteOrder(ctx.readBuffer, ctx.valuesBuffer, byteCount, ctx.elementByteSize, valueByteOffset);
+    }
+    return ctx.values;
+  }
+  var TypedArrayValueType;
+  var init_typed_array = __esm({
+    "node_modules/molstar/lib/mol-io/common/typed-array.js"() {
+      init_simple_buffer();
+      (function(TypedArrayValueType2) {
+        TypedArrayValueType2.Float32 = "float32";
+        TypedArrayValueType2.Int8 = "int8";
+        TypedArrayValueType2.Int16 = "int16";
+        TypedArrayValueType2.Uint16 = "uint16";
+      })(TypedArrayValueType || (TypedArrayValueType = {}));
+    }
+  });
+
+  // node_modules/molstar/lib/mol-io/reader/ccp4/parser.js
+  async function readCcp4Header(file) {
+    const headerSize = 1024;
+    const { buffer } = await file.readBuffer(0, headerSize);
+    const MAP = String.fromCharCode(buffer.readUInt8(52 * 4), buffer.readUInt8(52 * 4 + 1), buffer.readUInt8(52 * 4 + 2), buffer.readUInt8(52 * 4 + 3));
+    if (MAP !== "MAP ") {
+      throw new Error('ccp4 format error, missing "MAP " string');
+    }
+    const MACHST = [buffer.readUInt8(53 * 4), buffer.readUInt8(53 * 4 + 1)];
+    let littleEndian = false;
+    if (MACHST[0] === 68 && MACHST[1] === 65) {
+      littleEndian = true;
+    } else if (MACHST[0] === 17 && MACHST[1] === 17) {
+      littleEndian = false;
+    } else {
+      const modeLE = buffer.readInt32LE(3 * 4);
+      if (modeLE <= 16)
+        littleEndian = true;
+    }
+    const readInt = littleEndian ? (o) => buffer.readInt32LE(o * 4) : (o) => buffer.readInt32BE(o * 4);
+    const readFloat = littleEndian ? (o) => buffer.readFloatLE(o * 4) : (o) => buffer.readFloatBE(o * 4);
+    const header2 = {
+      NC: readInt(0),
+      NR: readInt(1),
+      NS: readInt(2),
+      MODE: readInt(3),
+      NCSTART: readInt(4),
+      NRSTART: readInt(5),
+      NSSTART: readInt(6),
+      NX: readInt(7),
+      NY: readInt(8),
+      NZ: readInt(9),
+      xLength: readFloat(10),
+      yLength: readFloat(11),
+      zLength: readFloat(12),
+      alpha: readFloat(13),
+      beta: readFloat(14),
+      gamma: readFloat(15),
+      MAPC: readInt(16),
+      MAPR: readInt(17),
+      MAPS: readInt(18),
+      AMIN: readFloat(19),
+      AMAX: readFloat(20),
+      AMEAN: readFloat(21),
+      ISPG: readInt(22),
+      NSYMBT: readInt(23),
+      LSKFLG: readInt(24),
+      SKWMAT: [],
+      // TODO bytes 26-34
+      SKWTRN: [],
+      // TODO bytes 35-37
+      userFlag1: readInt(39),
+      userFlag2: readInt(40),
+      // bytes 50-52 origin in X,Y,Z used for transforms
+      originX: readFloat(49),
+      originY: readFloat(50),
+      originZ: readFloat(51),
+      MAP,
+      // bytes 53 MAP
+      MACHST,
+      // bytes 54 MACHST
+      ARMS: readFloat(54)
+      // TODO bytes 56 NLABL
+      // TODO bytes 57-256 LABEL
+    };
+    return { header: header2, littleEndian };
+  }
+  async function readCcp4Slices(header2, buffer, file, byteOffset, length, littleEndian) {
+    if (isMapmode2to0(header2)) {
+      const valueByteOffset = 3 * length;
+      await file.readBuffer(byteOffset, buffer.readBuffer, length, valueByteOffset);
+      const int82 = new Int8Array(buffer.valuesBuffer.buffer, valueByteOffset);
+      const b1 = (header2.AMAX - header2.AMIN) / 255;
+      const b0 = 0.5 * (header2.AMIN + header2.AMAX + b1);
+      for (let j = 0, jl = length; j < jl; ++j) {
+        buffer.values[j] = b1 * int82[j] + b0;
+      }
+    } else {
+      await readTypedArray(buffer, file, byteOffset, length, 0, littleEndian);
+    }
+  }
+  function getCcp4DataType(mode) {
+    switch (mode) {
+      case 0:
+        return TypedArrayValueType.Int8;
+      case 1:
+        return TypedArrayValueType.Int16;
+      case 2:
+        return TypedArrayValueType.Float32;
+      case 3:
+        throw new Error("mode 3 unsupported, complex 16-bit integers");
+      case 4:
+        throw new Error("mode 4 unsupported, complex 32-bit reals");
+      case 6:
+        TypedArrayValueType.Uint16;
+      case 16:
+        throw new Error("mode 16 unsupported, unsigned char * 3 (for rgb data, non-standard)");
+    }
+    throw new Error(`unknown mode '${mode}'`);
+  }
+  function isMapmode2to0(header2) {
+    return header2.userFlag1 === -128 && header2.userFlag2 === 127;
+  }
+  function getCcp4ValueType(header2) {
+    return isMapmode2to0(header2) ? TypedArrayValueType.Float32 : getCcp4DataType(header2.MODE);
+  }
+  function getCcp4DataOffset(header2) {
+    return 256 * 4 + header2.NSYMBT;
+  }
+  async function parseInternal2(file, size4, ctx) {
+    await ctx.update({ message: "Parsing CCP4/MRC/MAP file..." });
+    const { header: header2, littleEndian } = await readCcp4Header(file);
+    const offset2 = getCcp4DataOffset(header2);
+    const dataType = getCcp4DataType(header2.MODE);
+    const valueType = getCcp4ValueType(header2);
+    const count3 = header2.NC * header2.NR * header2.NS;
+    const elementByteSize = getElementByteSize(dataType);
+    const byteCount = count3 * elementByteSize;
+    const buffer = createTypedArrayBufferContext(count3, valueType);
+    readCcp4Slices(header2, buffer, file, offset2, byteCount, littleEndian);
+    const result2 = { header: header2, values: buffer.values, name: file.name };
+    return result2;
+  }
+  function parseFile(file, size4) {
+    return Task.create("Parse CCP4/MRC/MAP", async (ctx) => {
+      try {
+        return ReaderResult.success(await parseInternal2(file, size4, ctx));
+      } catch (e) {
+        return ReaderResult.error(e);
+      }
+    });
+  }
+  function parse3(buffer, name) {
+    return parseFile(FileHandle.fromBuffer(SimpleBuffer.fromUint8Array(buffer), name), buffer.length);
+  }
+  var init_parser8 = __esm({
+    "node_modules/molstar/lib/mol-io/reader/ccp4/parser.js"() {
+      init_mol_task();
+      init_result();
+      init_file_handle();
+      init_simple_buffer();
+      init_typed_array();
+    }
+  });
+
+  // node_modules/molstar/lib/mol-io/reader/dsn6/parser.js
+  function parseBrixHeader(str11) {
+    return {
+      xStart: parseInt(str11.substr(10, 5)),
+      yStart: parseInt(str11.substr(15, 5)),
+      zStart: parseInt(str11.substr(20, 5)),
+      xExtent: parseInt(str11.substr(32, 5)),
+      yExtent: parseInt(str11.substr(38, 5)),
+      zExtent: parseInt(str11.substr(42, 5)),
+      xRate: parseInt(str11.substr(52, 5)),
+      yRate: parseInt(str11.substr(58, 5)),
+      zRate: parseInt(str11.substr(62, 5)),
+      xlen: parseFloat(str11.substr(73, 10)),
+      ylen: parseFloat(str11.substr(83, 10)),
+      zlen: parseFloat(str11.substr(93, 10)),
+      alpha: parseFloat(str11.substr(103, 10)),
+      beta: parseFloat(str11.substr(113, 10)),
+      gamma: parseFloat(str11.substr(123, 10)),
+      divisor: parseFloat(str11.substr(138, 12)),
+      summand: parseInt(str11.substr(155, 8)),
+      sigma: parseFloat(str11.substr(170, 12))
+    };
+  }
+  function parseDsn6Header(buffer, littleEndian) {
+    const readInt = littleEndian ? (o) => buffer.readInt16LE(o * 2) : (o) => buffer.readInt16BE(o * 2);
+    const factor = 1 / readInt(17);
+    return {
+      xStart: readInt(0),
+      yStart: readInt(1),
+      zStart: readInt(2),
+      xExtent: readInt(3),
+      yExtent: readInt(4),
+      zExtent: readInt(5),
+      xRate: readInt(6),
+      yRate: readInt(7),
+      zRate: readInt(8),
+      xlen: readInt(9) * factor,
+      ylen: readInt(10) * factor,
+      zlen: readInt(11) * factor,
+      alpha: readInt(12) * factor,
+      beta: readInt(13) * factor,
+      gamma: readInt(14) * factor,
+      divisor: readInt(15) / 100,
+      summand: readInt(16),
+      sigma: void 0
+    };
+  }
+  function getBlocks(header2) {
+    const { xExtent, yExtent, zExtent } = header2;
+    const xBlocks = Math.ceil(xExtent / 8);
+    const yBlocks = Math.ceil(yExtent / 8);
+    const zBlocks = Math.ceil(zExtent / 8);
+    return { xBlocks, yBlocks, zBlocks };
+  }
+  async function readDsn6Header(file) {
+    const { buffer } = await file.readBuffer(0, dsn6HeaderSize);
+    const brixStr = String.fromCharCode.apply(null, buffer);
+    const isBrix = brixStr.startsWith(":-)");
+    const littleEndian = isBrix || buffer.readInt16LE(18 * 2) === 100;
+    const header2 = isBrix ? parseBrixHeader(brixStr) : parseDsn6Header(buffer, littleEndian);
+    return { header: header2, littleEndian };
+  }
+  async function parseDsn6Values(header2, source, target, littleEndian) {
+    if (!littleEndian) {
+      SimpleBuffer.flipByteOrderInPlace2(source.buffer);
+    }
+    const { divisor, summand, xExtent, yExtent, zExtent } = header2;
+    const { xBlocks, yBlocks, zBlocks } = getBlocks(header2);
+    let offset2 = 0;
+    for (let zz = 0; zz < zBlocks; ++zz) {
+      for (let yy = 0; yy < yBlocks; ++yy) {
+        for (let xx = 0; xx < xBlocks; ++xx) {
+          for (let k = 0; k < 8; ++k) {
+            const z = 8 * zz + k;
+            for (let j = 0; j < 8; ++j) {
+              const y = 8 * yy + j;
+              for (let i = 0; i < 8; ++i) {
+                const x = 8 * xx + i;
+                if (x < xExtent && y < yExtent && z < zExtent) {
+                  const idx = (x * yExtent + y) * zExtent + z;
+                  target[idx] = (source[offset2] - summand) / divisor;
+                  ++offset2;
+                } else {
+                  offset2 += 8 - i;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  function getDsn6Counts(header2) {
+    const { xExtent, yExtent, zExtent } = header2;
+    const { xBlocks, yBlocks, zBlocks } = getBlocks(header2);
+    const valueCount = xExtent * yExtent * zExtent;
+    const count3 = xBlocks * 8 * yBlocks * 8 * zBlocks * 8;
+    const elementByteSize = 1;
+    const byteCount = count3 * elementByteSize;
+    return { count: count3, byteCount, valueCount };
+  }
+  async function parseInternal3(file, size4, ctx) {
+    await ctx.update({ message: "Parsing DSN6/BRIX file..." });
+    const { header: header2, littleEndian } = await readDsn6Header(file);
+    const { buffer } = await file.readBuffer(dsn6HeaderSize, size4 - dsn6HeaderSize);
+    const { valueCount } = getDsn6Counts(header2);
+    const values2 = new Float32Array(valueCount);
+    await parseDsn6Values(header2, buffer, values2, littleEndian);
+    const result2 = { header: header2, values: values2, name: file.name };
+    return result2;
+  }
+  function parseFile2(file, size4) {
+    return Task.create("Parse DSN6/BRIX", async (ctx) => {
+      try {
+        return ReaderResult.success(await parseInternal3(file, size4, ctx));
+      } catch (e) {
+        return ReaderResult.error(e);
+      }
+    });
+  }
+  function parse4(buffer, name) {
+    return parseFile2(FileHandle.fromBuffer(SimpleBuffer.fromUint8Array(buffer), name), buffer.length);
+  }
+  var dsn6HeaderSize;
+  var init_parser9 = __esm({
+    "node_modules/molstar/lib/mol-io/reader/dsn6/parser.js"() {
+      init_mol_task();
+      init_result();
+      init_file_handle();
+      init_simple_buffer();
+      dsn6HeaderSize = 512;
+    }
+  });
+
+  // node_modules/molstar/lib/mol-io/reader/ply/schema.js
+  function PlyType(str11) {
+    if (!PlyTypes.has(str11))
+      throw new Error(`unknown ply type '${str11}'`);
+    return str11;
+  }
+  function PlyFile(elements, elementNames, comments) {
+    const elementMap = /* @__PURE__ */ new Map();
+    for (let i = 0, il = elementNames.length; i < il; ++i) {
+      elementMap.set(elementNames[i], elements[i]);
+    }
+    return {
+      comments,
+      elementNames,
+      getElement: (name) => {
+        return elementMap.get(name);
+      }
+    };
+  }
+  var PlyTypeByteLength, PlyTypes;
+  var init_schema4 = __esm({
+    "node_modules/molstar/lib/mol-io/reader/ply/schema.js"() {
+      PlyTypeByteLength = {
+        "char": 1,
+        "uchar": 1,
+        "short": 2,
+        "ushort": 2,
+        "int": 4,
+        "uint": 4,
+        "float": 4,
+        "double": 8,
+        "int8": 1,
+        "uint8": 1,
+        "int16": 2,
+        "uint16": 2,
+        "int32": 4,
+        "uint32": 4,
+        "float32": 4,
+        "float64": 8
+      };
+      PlyTypes = new Set(Object.keys(PlyTypeByteLength));
+    }
+  });
+
+  // node_modules/molstar/lib/mol-io/reader/ply/parser.js
+  function State2(data, runtimeCtx) {
+    const tokenizer = Tokenizer(data);
+    return {
+      data,
+      tokenizer,
+      runtimeCtx,
+      comments: [],
+      elementSpecs: [],
+      elements: []
+    };
+  }
+  function markHeader(tokenizer) {
+    const endHeaderIndex = tokenizer.data.indexOf("end_header", tokenizer.position);
+    if (endHeaderIndex === -1)
+      throw new Error(`no 'end_header' record found`);
+    tokenizer.tokenStart = tokenizer.position;
+    tokenizer.tokenEnd = endHeaderIndex;
+    tokenizer.position = endHeaderIndex;
+    Tokenizer.eatLine(tokenizer);
+  }
+  function parseHeader(state) {
+    const { tokenizer, comments, elementSpecs } = state;
+    markHeader(tokenizer);
+    const headerLines = Tokenizer.getTokenString(tokenizer).split(/\r?\n/);
+    if (headerLines[0] !== "ply")
+      throw new Error(`data not starting with 'ply'`);
+    if (headerLines[1] !== "format ascii 1.0")
+      throw new Error(`format not 'ascii 1.0'`);
+    let currentName;
+    let currentCount;
+    let currentProperties;
+    function addCurrentElementSchema() {
+      if (currentName !== void 0 && currentCount !== void 0 && currentProperties !== void 0) {
+        let isList2 = false;
+        for (let i = 0, il = currentProperties.length; i < il; ++i) {
+          const p3 = currentProperties[i];
+          if (p3.kind === "list") {
+            isList2 = true;
+            break;
+          }
+        }
+        if (isList2 && currentProperties.length !== 1) {
+        }
+        if (isList2) {
+          elementSpecs.push({
+            kind: "list",
+            name: currentName,
+            count: currentCount,
+            property: currentProperties[0]
+          });
+        } else {
+          elementSpecs.push({
+            kind: "table",
+            name: currentName,
+            count: currentCount,
+            properties: currentProperties
+          });
+        }
+      }
+    }
+    for (let i = 2, il = headerLines.length; i < il; ++i) {
+      const l = headerLines[i];
+      const ls = l.split(" ");
+      if (l.startsWith("comment")) {
+        comments.push(l.substr(8));
+      } else if (l.startsWith("element")) {
+        addCurrentElementSchema();
+        currentProperties = [];
+        currentName = ls[1];
+        currentCount = parseInt(ls[2]);
+      } else if (l.startsWith("property")) {
+        if (currentProperties === void 0)
+          throw new Error(`properties outside of element`);
+        if (ls[1] === "list") {
+          currentProperties.push({
+            kind: "list",
+            countType: PlyType(ls[2]),
+            dataType: PlyType(ls[3]),
+            name: ls[4]
+          });
+        } else {
+          currentProperties.push({
+            kind: "column",
+            type: PlyType(ls[1]),
+            name: ls[2]
+          });
+        }
+      } else if (l.startsWith("end_header")) {
+        addCurrentElementSchema();
+      } else {
+        console.warn("unknown header line");
+      }
+    }
+  }
+  function parseElements(state) {
+    const { elementSpecs } = state;
+    for (let i = 0, il = elementSpecs.length; i < il; ++i) {
+      const spec = elementSpecs[i];
+      if (spec.kind === "table")
+        parseTableElement(state, spec);
+      else if (spec.kind === "list")
+        parseListElement(state, spec);
+    }
+  }
+  function getColumnSchema(type3) {
+    switch (type3) {
+      case "char":
+      case "uchar":
+      case "int8":
+      case "uint8":
+      case "short":
+      case "ushort":
+      case "int16":
+      case "uint16":
+      case "int":
+      case "uint":
+      case "int32":
+      case "uint32":
+        return Column.Schema.int;
+      case "float":
+      case "double":
+      case "float32":
+      case "float64":
+        return Column.Schema.float;
+    }
+  }
+  function parseTableElement(state, spec) {
+    const { elements, tokenizer } = state;
+    const { count: count3, properties: properties4 } = spec;
+    const propertyCount = properties4.length;
+    const propertyNames = [];
+    const propertyTypes = [];
+    const propertyTokens = [];
+    const propertyColumns = /* @__PURE__ */ new Map();
+    for (let i = 0, il = propertyCount; i < il; ++i) {
+      const tokens = TokenBuilder.create(tokenizer.data, count3 * 2);
+      propertyTokens.push(tokens);
+    }
+    for (let i = 0, il = count3; i < il; ++i) {
+      for (let j = 0, jl = propertyCount; j < jl; ++j) {
+        Tokenizer.skipWhitespace(tokenizer);
+        Tokenizer.markStart(tokenizer);
+        Tokenizer.eatValue(tokenizer);
+        TokenBuilder.addUnchecked(propertyTokens[j], tokenizer.tokenStart, tokenizer.tokenEnd);
+      }
+    }
+    for (let i = 0, il = propertyCount; i < il; ++i) {
+      const { type: type3, name } = properties4[i];
+      const column = TokenColumn(propertyTokens[i], getColumnSchema(type3));
+      propertyNames.push(name);
+      propertyTypes.push(type3);
+      propertyColumns.set(name, column);
+    }
+    elements.push({
+      kind: "table",
+      rowCount: count3,
+      propertyNames,
+      propertyTypes,
+      getProperty: (name) => propertyColumns.get(name)
+    });
+  }
+  function parseListElement(state, spec) {
+    const { elements, tokenizer } = state;
+    const { count: count3, property: property2 } = spec;
+    const tokens = TokenBuilder.create(tokenizer.data, count3 * 2 * 3);
+    const offsets = new Uint32Array(count3 + 1);
+    let entryCount = 0;
+    for (let i = 0, il = count3; i < il; ++i) {
+      Tokenizer.skipWhitespace(tokenizer);
+      Tokenizer.markStart(tokenizer);
+      while (Tokenizer.skipWhitespace(tokenizer) !== 10) {
+        ++entryCount;
+        Tokenizer.markStart(tokenizer);
+        Tokenizer.eatValue(tokenizer);
+        TokenBuilder.addToken(tokens, tokenizer);
+      }
+      offsets[i + 1] = entryCount;
+    }
+    const listValue = {
+      entries: [],
+      count: 0
+    };
+    const column = TokenColumn(tokens, getColumnSchema(property2.dataType));
+    elements.push({
+      kind: "list",
+      rowCount: count3,
+      name: property2.name,
+      type: property2.dataType,
+      value: (row) => {
+        const offset2 = offsets[row] + 1;
+        const count4 = column.value(offset2 - 1);
+        for (let i = offset2, il = offset2 + count4; i < il; ++i) {
+          listValue.entries[i - offset2] = column.value(i);
+        }
+        listValue.count = count4;
+        return listValue;
+      }
+    });
+  }
+  async function parseInternal4(data, ctx) {
+    const state = State2(data, ctx);
+    ctx.update({ message: "Parsing...", current: 0, max: data.length });
+    parseHeader(state);
+    parseElements(state);
+    const { elements, elementSpecs, comments } = state;
+    const elementNames = elementSpecs.map((s) => s.name);
+    const result2 = PlyFile(elements, elementNames, comments);
+    return ReaderResult.success(result2);
+  }
+  function parsePly(data) {
+    return Task.create("Parse PLY", async (ctx) => {
+      return await parseInternal4(data, ctx);
+    });
+  }
+  var init_parser10 = __esm({
+    "node_modules/molstar/lib/mol-io/reader/ply/parser.js"() {
+      init_result();
+      init_mol_task();
+      init_schema4();
+      init_tokenizer();
+      init_db();
+      init_token();
+    }
+  });
+
+  // node_modules/molstar/lib/mol-io/reader/psf/parser.js
+  function State3(tokenizer, runtimeCtx) {
+    return {
+      tokenizer,
+      runtimeCtx
+    };
+  }
+  async function handleAtoms(state, count3) {
+    const { tokenizer } = state;
+    const atomId = TokenBuilder.create(tokenizer.data, count3 * 2);
+    const segmentName = TokenBuilder.create(tokenizer.data, count3 * 2);
+    const residueId = TokenBuilder.create(tokenizer.data, count3 * 2);
+    const residueName = TokenBuilder.create(tokenizer.data, count3 * 2);
+    const atomName = TokenBuilder.create(tokenizer.data, count3 * 2);
+    const atomType = TokenBuilder.create(tokenizer.data, count3 * 2);
+    const charge = TokenBuilder.create(tokenizer.data, count3 * 2);
+    const mass = TokenBuilder.create(tokenizer.data, count3 * 2);
+    const { position } = tokenizer;
+    const line = readLine(tokenizer).trim();
+    tokenizer.position = position;
+    const isLammpsFull = line.split(reWhitespace).length === 7;
+    const n = isLammpsFull ? 6 : 8;
+    const { length } = tokenizer;
+    let linesAlreadyRead = 0;
+    await chunkedSubtask(state.runtimeCtx, 1e5, void 0, (chunkSize) => {
+      const linesToRead = Math.min(count3 - linesAlreadyRead, chunkSize);
+      for (let i = 0; i < linesToRead; ++i) {
+        for (let j = 0; j < n; ++j) {
+          skipWhitespace2(tokenizer);
+          markStart(tokenizer);
+          eatValue2(tokenizer);
+          if (isLammpsFull) {
+            switch (j) {
+              case 0:
+                TokenBuilder.addUnchecked(atomId, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+              case 1:
+                TokenBuilder.addUnchecked(residueId, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+              case 2:
+                TokenBuilder.addUnchecked(atomName, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+              case 3:
+                TokenBuilder.addUnchecked(atomType, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+              case 4:
+                TokenBuilder.addUnchecked(charge, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+              case 5:
+                TokenBuilder.addUnchecked(mass, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+            }
+          } else {
+            switch (j) {
+              case 0:
+                TokenBuilder.addUnchecked(atomId, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+              case 1:
+                TokenBuilder.addUnchecked(segmentName, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+              case 2:
+                TokenBuilder.addUnchecked(residueId, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+              case 3:
+                TokenBuilder.addUnchecked(residueName, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+              case 4:
+                TokenBuilder.addUnchecked(atomName, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+              case 5:
+                TokenBuilder.addUnchecked(atomType, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+              case 6:
+                TokenBuilder.addUnchecked(charge, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+              case 7:
+                TokenBuilder.addUnchecked(mass, tokenizer.tokenStart, tokenizer.tokenEnd);
+                break;
+            }
+          }
+        }
+        eatLine(tokenizer);
+        markStart(tokenizer);
+      }
+      linesAlreadyRead += linesToRead;
+      return linesToRead;
+    }, (ctx) => ctx.update({ message: "Parsing...", current: tokenizer.position, max: length }));
+    return {
+      count: count3,
+      atomId: TokenColumnProvider(atomId)(Column.Schema.int),
+      segmentName: isLammpsFull ? TokenColumnProvider(residueId)(Column.Schema.str) : TokenColumnProvider(segmentName)(Column.Schema.str),
+      residueId: TokenColumnProvider(residueId)(Column.Schema.int),
+      residueName: isLammpsFull ? TokenColumnProvider(residueId)(Column.Schema.str) : TokenColumnProvider(residueName)(Column.Schema.str),
+      atomName: TokenColumnProvider(atomName)(Column.Schema.str),
+      atomType: TokenColumnProvider(atomType)(Column.Schema.str),
+      charge: TokenColumnProvider(charge)(Column.Schema.float),
+      mass: TokenColumnProvider(mass)(Column.Schema.float)
+    };
+  }
+  async function handleBonds(state, count3) {
+    const { tokenizer } = state;
+    const atomIdA = TokenBuilder.create(tokenizer.data, count3 * 2);
+    const atomIdB = TokenBuilder.create(tokenizer.data, count3 * 2);
+    const { length } = tokenizer;
+    let bondsAlreadyRead = 0;
+    await chunkedSubtask(state.runtimeCtx, 10, void 0, (chunkSize) => {
+      const bondsToRead = Math.min(count3 - bondsAlreadyRead, chunkSize);
+      for (let i = 0; i < bondsToRead; ++i) {
+        for (let j = 0; j < 2; ++j) {
+          skipWhitespace2(tokenizer);
+          markStart(tokenizer);
+          eatValue2(tokenizer);
+          switch (j) {
+            case 0:
+              TokenBuilder.addUnchecked(atomIdA, tokenizer.tokenStart, tokenizer.tokenEnd);
+              break;
+            case 1:
+              TokenBuilder.addUnchecked(atomIdB, tokenizer.tokenStart, tokenizer.tokenEnd);
+              break;
+          }
+        }
+      }
+      bondsAlreadyRead += bondsToRead;
+      return bondsToRead;
+    }, (ctx) => ctx.update({ message: "Parsing...", current: tokenizer.position, max: length }));
+    return {
+      count: count3,
+      atomIdA: TokenColumnProvider(atomIdA)(Column.Schema.int),
+      atomIdB: TokenColumnProvider(atomIdB)(Column.Schema.int)
+    };
+  }
+  function parseTitle(state, count3) {
+    const title = [];
+    for (let i = 0; i < count3; ++i) {
+      const line = readLine(state.tokenizer);
+      title.push(line.replace(reTitle, "").trim());
+    }
+    return title;
+  }
+  async function parseInternal5(data, ctx) {
+    const tokenizer = Tokenizer(data);
+    const state = State3(tokenizer, ctx);
+    let title = void 0;
+    let atoms2 = void 0;
+    let bonds = void 0;
+    const id = readLine(state.tokenizer).trim();
+    while (tokenizer.tokenEnd < tokenizer.length) {
+      const line = readLine(state.tokenizer).trim();
+      if (line.includes("!NTITLE")) {
+        const numTitle = parseInt(line.split(reWhitespace)[0]);
+        title = parseTitle(state, numTitle);
+      } else if (line.includes("!NATOM")) {
+        const numAtoms = parseInt(line.split(reWhitespace)[0]);
+        atoms2 = await handleAtoms(state, numAtoms);
+      } else if (line.includes("!NBOND")) {
+        const numBonds = parseInt(line.split(reWhitespace)[0]);
+        bonds = await handleBonds(state, numBonds);
+        break;
+      } else if (line.includes("!NTHETA")) {
+      } else if (line.includes("!NPHI")) {
+      } else if (line.includes("!NIMPHI")) {
+      } else if (line.includes("!NDON")) {
+      } else if (line.includes("!NACC")) {
+      } else if (line.includes("!NNB")) {
+      } else if (line.includes("!NGRP NST2")) {
+      } else if (line.includes("!MOLNT")) {
+      } else if (line.includes("!NUMLP NUMLPH")) {
+      } else if (line.includes("!NCRTERM")) {
+      }
+    }
+    if (title === void 0) {
+      title = [];
+    }
+    if (atoms2 === void 0) {
+      return ReaderResult.error("no atoms data");
+    }
+    if (bonds === void 0) {
+      return ReaderResult.error("no bonds data");
+    }
+    const result2 = {
+      id,
+      title,
+      atoms: atoms2,
+      bonds
+    };
+    return ReaderResult.success(result2);
+  }
+  function parsePsf(data) {
+    return Task.create("Parse PSF", async (ctx) => {
+      return await parseInternal5(data, ctx);
+    });
+  }
+  var readLine, skipWhitespace2, eatValue2, eatLine, markStart, reWhitespace, reTitle;
+  var init_parser11 = __esm({
+    "node_modules/molstar/lib/mol-io/reader/psf/parser.js"() {
+      init_mol_task();
+      init_tokenizer();
+      init_result();
+      init_token();
+      init_db();
+      ({ readLine, skipWhitespace: skipWhitespace2, eatValue: eatValue2, eatLine, markStart } = Tokenizer);
+      reWhitespace = /\s+/;
+      reTitle = /(^\*|REMARK)*/;
     }
   });
 
@@ -45643,7 +52720,7 @@ ${subTree.join("\n")}`;
       };
     }
   }
-  function makeList(origin, capacity, level, root, tail, ownerID, hash5) {
+  function makeList2(origin, capacity, level, root, tail, ownerID, hash5) {
     var list3 = Object.create(ListPrototype);
     list3.size = capacity - origin;
     list3._origin = origin;
@@ -45657,7 +52734,7 @@ ${subTree.join("\n")}`;
     return list3;
   }
   function emptyList() {
-    return makeList(0, 0, SHIFT);
+    return makeList2(0, 0, SHIFT);
   }
   function updateList(list3, index, value) {
     index = wrapIndex(list3, index);
@@ -45695,7 +52772,7 @@ ${subTree.join("\n")}`;
       list3.__altered = true;
       return list3;
     }
-    return makeList(list3._origin, list3._capacity, list3._level, newRoot, newTail);
+    return makeList2(list3._origin, list3._capacity, list3._level, newRoot, newTail);
   }
   function updateVNode(node, ownerID, level, index, value, didAlter) {
     var idx = index >>> level & MASK;
@@ -45858,7 +52935,7 @@ ${subTree.join("\n")}`;
       list3.__altered = true;
       return list3;
     }
-    return makeList(newOrigin, newCapacity, newLevel, newRoot, newTail);
+    return makeList2(newOrigin, newCapacity, newLevel, newRoot, newTail);
   }
   function getTailOffset(size4) {
     return size4 < SIZE ? 0 : size4 - 1 >>> SHIFT << SHIFT;
@@ -47263,7 +54340,7 @@ ${subTree.join("\n")}`;
           }
           assertNotInfinite(size4);
           if (size4 > 0 && size4 < SIZE) {
-            return makeList(0, size4, SHIFT, null, new VNode(iter.toArray()));
+            return makeList2(0, size4, SHIFT, null, new VNode(iter.toArray()));
           }
           return empty.withMutations(function(list3) {
             list3.setSize(size4);
@@ -47430,7 +54507,7 @@ ${subTree.join("\n")}`;
             this.__altered = false;
             return this;
           }
-          return makeList(
+          return makeList2(
             this._origin,
             this._capacity,
             this._level,
@@ -48795,6 +55872,7 @@ ${subTree.join("\n")}`;
       init_param_definition();
       init_action();
       init_string();
+      init_debug();
       (function(Transformer2) {
         function getParamDefinition(t2, a5, globalCtx) {
           return t2.definition.params ? t2.definition.params(a5, globalCtx) : {};
@@ -48816,7 +55894,14 @@ ${subTree.join("\n")}`;
         function _index(tr) {
           for (const t2 of tr.definition.from) {
             if (fromTypeIndex.has(t2.type)) {
-              fromTypeIndex.get(t2.type).push(tr);
+              const xs = fromTypeIndex.get(t2.type);
+              for (let i = 0; i < xs.length; i++) {
+                if (xs[i].id === tr.id) {
+                  xs[i] = tr;
+                  return;
+                }
+              }
+              xs.push(tr);
             } else {
               fromTypeIndex.set(t2.type, [tr]);
             }
@@ -48842,7 +55927,12 @@ ${subTree.join("\n")}`;
           const { name } = definition;
           const id = `${namespace}.${name}`;
           if (registry.has(id)) {
-            console.warn(`A transform with id '${name}' is already registered. Please pick a unique identifier for your transforms and/or register them only once. This is to ensure that transforms can be serialized and replayed.`);
+            if (registry.get(id).definition === definition) {
+              return registry.get(id);
+            }
+            if (!isProductionMode) {
+              console.warn(`A transform with id '${name}' is already registered. Please pick a unique identifier for your transforms and/or register them only once. This is to ensure that transforms can be serialized and replayed.`);
+            }
           }
           const t2 = {
             apply(parent, params, props) {
@@ -53380,7 +60470,7 @@ ${subTree.join("\n")}`;
       cell.cache = /* @__PURE__ */ Object.create(null);
     return runTask(transformer.definition.update({ a: a5, oldParams, b: b5, newParams, cache: cell.cache, spine: ctx.spine, dependencies: resolveDependencies(cell) }, ctx.parent.globalContext), ctx.taskCtx);
   }
-  var State2, StateUpdateDefaultOptions, ParentNullErrorText;
+  var State4, StateUpdateDefaultOptions, ParentNullErrorText;
   var init_state = __esm({
     "node_modules/molstar/lib/mol-state/state.js"() {
       init_object2();
@@ -53400,7 +60490,7 @@ ${subTree.join("\n")}`;
       init_array();
       init_unique_array();
       init_object();
-      State2 = class {
+      State4 = class {
         get tree() {
           return this._tree;
         }
@@ -53741,7 +60831,7 @@ ${subTree.join("\n")}`;
           }
           ObjectEvent2.isCell = isCell;
         })(ObjectEvent = State11.ObjectEvent || (State11.ObjectEvent = {}));
-      })(State2 || (State2 = {}));
+      })(State4 || (State4 = {}));
       StateUpdateDefaultOptions = {
         doNotLogTiming: false,
         doNotUpdateCurrent: true,
@@ -53902,948 +60992,6 @@ ${subTree.join("\n")}`;
     }
   });
 
-  // node_modules/molstar/lib/mol-io/common/simple-buffer.js
-  var SimpleBuffer;
-  var init_simple_buffer = __esm({
-    "node_modules/molstar/lib/mol-io/common/simple-buffer.js"() {
-      init_mol_util();
-      (function(SimpleBuffer2) {
-        function fromUint8Array(array2) {
-          const dv = new DataView(array2.buffer);
-          return Object.assign(array2.subarray(0), {
-            readInt8: (offset2) => dv.getInt8(offset2),
-            readUInt8: (offset2) => dv.getUint8(offset2),
-            writeInt8: (value, offset2) => dv.setInt8(offset2, value),
-            writeUInt8: (value, offset2) => dv.setUint8(offset2, value),
-            readInt16LE: (offset2) => dv.getInt16(offset2, true),
-            readInt32LE: (offset2) => dv.getInt32(offset2, true),
-            readUInt16LE: (offset2) => dv.getUint16(offset2, true),
-            readUInt32LE: (offset2) => dv.getUint32(offset2, true),
-            readFloatLE: (offset2) => dv.getFloat32(offset2, true),
-            readDoubleLE: (offset2) => dv.getFloat64(offset2, true),
-            writeInt16LE: (value, offset2) => dv.setInt16(offset2, value, true),
-            writeInt32LE: (value, offset2) => dv.setInt32(offset2, value, true),
-            writeUInt16LE: (value, offset2) => dv.setUint16(offset2, value, true),
-            writeUInt32LE: (value, offset2) => dv.setUint32(offset2, value, true),
-            writeFloatLE: (value, offset2) => dv.setFloat32(offset2, value, true),
-            writeDoubleLE: (value, offset2) => dv.setFloat64(offset2, value, true),
-            readInt16BE: (offset2) => dv.getInt16(offset2, false),
-            readInt32BE: (offset2) => dv.getInt32(offset2, false),
-            readUInt16BE: (offset2) => dv.getUint16(offset2, false),
-            readUInt32BE: (offset2) => dv.getUint32(offset2, false),
-            readFloatBE: (offset2) => dv.getFloat32(offset2, false),
-            readDoubleBE: (offset2) => dv.getFloat64(offset2, false),
-            writeInt16BE: (value, offset2) => dv.setInt16(offset2, value, false),
-            writeInt32BE: (value, offset2) => dv.setInt32(offset2, value, false),
-            writeUInt16BE: (value, offset2) => dv.setUint16(offset2, value, false),
-            writeUInt32BE: (value, offset2) => dv.setUint32(offset2, value, false),
-            writeFloatBE: (value, offset2) => dv.setFloat32(offset2, value, false),
-            writeDoubleBE: (value, offset2) => dv.setFloat64(offset2, value, false),
-            copy: (targetBuffer, targetStart, sourceStart, sourceEnd) => {
-              targetStart = defaults(targetStart, 0);
-              sourceStart = defaults(sourceStart, 0);
-              sourceEnd = defaults(sourceEnd, array2.length);
-              targetBuffer.set(array2.subarray(sourceStart, sourceEnd), targetStart);
-              return sourceEnd - sourceStart;
-            }
-          });
-        }
-        SimpleBuffer2.fromUint8Array = fromUint8Array;
-        function fromArrayBuffer(arrayBuffer) {
-          return fromUint8Array(new Uint8Array(arrayBuffer));
-        }
-        SimpleBuffer2.fromArrayBuffer = fromArrayBuffer;
-        function fromBuffer(buffer) {
-          return buffer;
-        }
-        SimpleBuffer2.fromBuffer = fromBuffer;
-        SimpleBuffer2.IsNativeEndianLittle = new Uint16Array(new Uint8Array([18, 52]).buffer)[0] === 13330;
-        function flipByteOrder2(source, target, byteCount, elementByteSize, offset2) {
-          for (let i = 0, n = byteCount; i < n; i += elementByteSize) {
-            for (let j = 0; j < elementByteSize; j++) {
-              target[offset2 + i + elementByteSize - j - 1] = source[offset2 + i + j];
-            }
-          }
-        }
-        SimpleBuffer2.flipByteOrder = flipByteOrder2;
-        function flipByteOrderInPlace2(buffer, byteOffset = 0, length) {
-          const intView = new Int16Array(buffer, byteOffset, length);
-          for (let i = 0, n = intView.length; i < n; ++i) {
-            const val = intView[i];
-            intView[i] = (val & 255) << 8 | val >> 8 & 255;
-          }
-        }
-        SimpleBuffer2.flipByteOrderInPlace2 = flipByteOrderInPlace2;
-        function ensureLittleEndian(source, target, byteCount, elementByteSize, offset2) {
-          if (SimpleBuffer2.IsNativeEndianLittle)
-            return;
-          if (!byteCount || elementByteSize <= 1)
-            return;
-          flipByteOrder2(source, target, byteCount, elementByteSize, offset2);
-        }
-        SimpleBuffer2.ensureLittleEndian = ensureLittleEndian;
-      })(SimpleBuffer || (SimpleBuffer = {}));
-    }
-  });
-
-  // node_modules/molstar/lib/mol-io/common/file-handle.js
-  var FileHandle;
-  var init_file_handle = __esm({
-    "node_modules/molstar/lib/mol-io/common/file-handle.js"() {
-      init_mol_util();
-      init_simple_buffer();
-      (function(FileHandle2) {
-        function fromBuffer(buffer, name) {
-          return {
-            name,
-            readBuffer: (position, sizeOrBuffer, size4, byteOffset) => {
-              let bytesRead;
-              let outBuffer;
-              if (typeof sizeOrBuffer === "number") {
-                size4 = defaults(size4, sizeOrBuffer);
-                const start4 = position;
-                const end4 = Math.min(buffer.length, start4 + size4);
-                bytesRead = end4 - start4;
-                outBuffer = SimpleBuffer.fromUint8Array(new Uint8Array(buffer.buffer, start4, end4 - start4));
-              } else {
-                size4 = defaults(size4, sizeOrBuffer.length);
-                const start4 = position;
-                const end4 = Math.min(buffer.length, start4 + size4);
-                sizeOrBuffer.set(buffer.subarray(start4, end4), byteOffset);
-                bytesRead = end4 - start4;
-                outBuffer = sizeOrBuffer;
-              }
-              if (size4 !== bytesRead) {
-                console.warn(`byteCount ${size4} and bytesRead ${bytesRead} differ`);
-              }
-              return Promise.resolve({ bytesRead, buffer: outBuffer });
-            },
-            writeBuffer: (position, buffer2, length) => {
-              length = defaults(length, buffer2.length);
-              console.error(".writeBuffer not implemented for FileHandle.fromBuffer");
-              return Promise.resolve(0);
-            },
-            writeBufferSync: (position, buffer2, length) => {
-              length = defaults(length, buffer2.length);
-              console.error(".writeSync not implemented for FileHandle.fromBuffer");
-              return 0;
-            },
-            close: noop
-          };
-        }
-        FileHandle2.fromBuffer = fromBuffer;
-      })(FileHandle || (FileHandle = {}));
-    }
-  });
-
-  // node_modules/molstar/lib/mol-io/common/typed-array.js
-  function getElementByteSize(type3) {
-    if (type3 === TypedArrayValueType.Float32)
-      return 4;
-    if (type3 === TypedArrayValueType.Int16)
-      return 2;
-    if (type3 === TypedArrayValueType.Uint16)
-      return 2;
-    return 1;
-  }
-  function makeTypedArray(type3, buffer, byteOffset = 0, length) {
-    if (type3 === TypedArrayValueType.Float32)
-      return new Float32Array(buffer, byteOffset, length);
-    if (type3 === TypedArrayValueType.Int16)
-      return new Int16Array(buffer, byteOffset, length);
-    if (type3 === TypedArrayValueType.Uint16)
-      return new Uint16Array(buffer, byteOffset, length);
-    return new Int8Array(buffer, byteOffset, length);
-  }
-  function createTypedArrayBufferContext(size4, type3) {
-    const elementByteSize = getElementByteSize(type3);
-    const arrayBuffer = new ArrayBuffer(elementByteSize * size4);
-    const readBuffer = SimpleBuffer.fromArrayBuffer(arrayBuffer);
-    const valuesBuffer = SimpleBuffer.IsNativeEndianLittle ? arrayBuffer : new ArrayBuffer(elementByteSize * size4);
-    return {
-      type: type3,
-      elementByteSize,
-      readBuffer,
-      valuesBuffer: new Uint8Array(valuesBuffer),
-      values: makeTypedArray(type3, valuesBuffer)
-    };
-  }
-  async function readTypedArray(ctx, file, position, byteCount, valueByteOffset, littleEndian) {
-    await file.readBuffer(position, ctx.readBuffer, byteCount, valueByteOffset);
-    if (ctx.elementByteSize > 1 && (littleEndian !== void 0 && littleEndian !== SimpleBuffer.IsNativeEndianLittle || !SimpleBuffer.IsNativeEndianLittle)) {
-      SimpleBuffer.flipByteOrder(ctx.readBuffer, ctx.valuesBuffer, byteCount, ctx.elementByteSize, valueByteOffset);
-    }
-    return ctx.values;
-  }
-  var TypedArrayValueType;
-  var init_typed_array = __esm({
-    "node_modules/molstar/lib/mol-io/common/typed-array.js"() {
-      init_simple_buffer();
-      (function(TypedArrayValueType2) {
-        TypedArrayValueType2.Float32 = "float32";
-        TypedArrayValueType2.Int8 = "int8";
-        TypedArrayValueType2.Int16 = "int16";
-        TypedArrayValueType2.Uint16 = "uint16";
-      })(TypedArrayValueType || (TypedArrayValueType = {}));
-    }
-  });
-
-  // node_modules/molstar/lib/mol-io/reader/ccp4/parser.js
-  async function readCcp4Header(file) {
-    const headerSize = 1024;
-    const { buffer } = await file.readBuffer(0, headerSize);
-    const MAP = String.fromCharCode(buffer.readUInt8(52 * 4), buffer.readUInt8(52 * 4 + 1), buffer.readUInt8(52 * 4 + 2), buffer.readUInt8(52 * 4 + 3));
-    if (MAP !== "MAP ") {
-      throw new Error('ccp4 format error, missing "MAP " string');
-    }
-    const MACHST = [buffer.readUInt8(53 * 4), buffer.readUInt8(53 * 4 + 1)];
-    let littleEndian = false;
-    if (MACHST[0] === 68 && MACHST[1] === 65) {
-      littleEndian = true;
-    } else if (MACHST[0] === 17 && MACHST[1] === 17) {
-      littleEndian = false;
-    } else {
-      const modeLE = buffer.readInt32LE(3 * 4);
-      if (modeLE <= 16)
-        littleEndian = true;
-    }
-    const readInt = littleEndian ? (o) => buffer.readInt32LE(o * 4) : (o) => buffer.readInt32BE(o * 4);
-    const readFloat = littleEndian ? (o) => buffer.readFloatLE(o * 4) : (o) => buffer.readFloatBE(o * 4);
-    const header2 = {
-      NC: readInt(0),
-      NR: readInt(1),
-      NS: readInt(2),
-      MODE: readInt(3),
-      NCSTART: readInt(4),
-      NRSTART: readInt(5),
-      NSSTART: readInt(6),
-      NX: readInt(7),
-      NY: readInt(8),
-      NZ: readInt(9),
-      xLength: readFloat(10),
-      yLength: readFloat(11),
-      zLength: readFloat(12),
-      alpha: readFloat(13),
-      beta: readFloat(14),
-      gamma: readFloat(15),
-      MAPC: readInt(16),
-      MAPR: readInt(17),
-      MAPS: readInt(18),
-      AMIN: readFloat(19),
-      AMAX: readFloat(20),
-      AMEAN: readFloat(21),
-      ISPG: readInt(22),
-      NSYMBT: readInt(23),
-      LSKFLG: readInt(24),
-      SKWMAT: [],
-      // TODO bytes 26-34
-      SKWTRN: [],
-      // TODO bytes 35-37
-      userFlag1: readInt(39),
-      userFlag2: readInt(40),
-      // bytes 50-52 origin in X,Y,Z used for transforms
-      originX: readFloat(49),
-      originY: readFloat(50),
-      originZ: readFloat(51),
-      MAP,
-      // bytes 53 MAP
-      MACHST,
-      // bytes 54 MACHST
-      ARMS: readFloat(54)
-      // TODO bytes 56 NLABL
-      // TODO bytes 57-256 LABEL
-    };
-    return { header: header2, littleEndian };
-  }
-  async function readCcp4Slices(header2, buffer, file, byteOffset, length, littleEndian) {
-    if (isMapmode2to0(header2)) {
-      const valueByteOffset = 3 * length;
-      await file.readBuffer(byteOffset, buffer.readBuffer, length, valueByteOffset);
-      const int82 = new Int8Array(buffer.valuesBuffer.buffer, valueByteOffset);
-      const b1 = (header2.AMAX - header2.AMIN) / 255;
-      const b0 = 0.5 * (header2.AMIN + header2.AMAX + b1);
-      for (let j = 0, jl = length; j < jl; ++j) {
-        buffer.values[j] = b1 * int82[j] + b0;
-      }
-    } else {
-      await readTypedArray(buffer, file, byteOffset, length, 0, littleEndian);
-    }
-  }
-  function getCcp4DataType(mode) {
-    switch (mode) {
-      case 0:
-        return TypedArrayValueType.Int8;
-      case 1:
-        return TypedArrayValueType.Int16;
-      case 2:
-        return TypedArrayValueType.Float32;
-      case 3:
-        throw new Error("mode 3 unsupported, complex 16-bit integers");
-      case 4:
-        throw new Error("mode 4 unsupported, complex 32-bit reals");
-      case 6:
-        TypedArrayValueType.Uint16;
-      case 16:
-        throw new Error("mode 16 unsupported, unsigned char * 3 (for rgb data, non-standard)");
-    }
-    throw new Error(`unknown mode '${mode}'`);
-  }
-  function isMapmode2to0(header2) {
-    return header2.userFlag1 === -128 && header2.userFlag2 === 127;
-  }
-  function getCcp4ValueType(header2) {
-    return isMapmode2to0(header2) ? TypedArrayValueType.Float32 : getCcp4DataType(header2.MODE);
-  }
-  function getCcp4DataOffset(header2) {
-    return 256 * 4 + header2.NSYMBT;
-  }
-  async function parseInternal2(file, size4, ctx) {
-    await ctx.update({ message: "Parsing CCP4/MRC/MAP file..." });
-    const { header: header2, littleEndian } = await readCcp4Header(file);
-    const offset2 = getCcp4DataOffset(header2);
-    const dataType = getCcp4DataType(header2.MODE);
-    const valueType = getCcp4ValueType(header2);
-    const count3 = header2.NC * header2.NR * header2.NS;
-    const elementByteSize = getElementByteSize(dataType);
-    const byteCount = count3 * elementByteSize;
-    const buffer = createTypedArrayBufferContext(count3, valueType);
-    readCcp4Slices(header2, buffer, file, offset2, byteCount, littleEndian);
-    const result2 = { header: header2, values: buffer.values, name: file.name };
-    return result2;
-  }
-  function parseFile(file, size4) {
-    return Task.create("Parse CCP4/MRC/MAP", async (ctx) => {
-      try {
-        return ReaderResult.success(await parseInternal2(file, size4, ctx));
-      } catch (e) {
-        return ReaderResult.error(e);
-      }
-    });
-  }
-  function parse2(buffer, name) {
-    return parseFile(FileHandle.fromBuffer(SimpleBuffer.fromUint8Array(buffer), name), buffer.length);
-  }
-  var init_parser4 = __esm({
-    "node_modules/molstar/lib/mol-io/reader/ccp4/parser.js"() {
-      init_mol_task();
-      init_result();
-      init_file_handle();
-      init_simple_buffer();
-      init_typed_array();
-    }
-  });
-
-  // node_modules/molstar/lib/mol-io/reader/dsn6/parser.js
-  function parseBrixHeader(str11) {
-    return {
-      xStart: parseInt(str11.substr(10, 5)),
-      yStart: parseInt(str11.substr(15, 5)),
-      zStart: parseInt(str11.substr(20, 5)),
-      xExtent: parseInt(str11.substr(32, 5)),
-      yExtent: parseInt(str11.substr(38, 5)),
-      zExtent: parseInt(str11.substr(42, 5)),
-      xRate: parseInt(str11.substr(52, 5)),
-      yRate: parseInt(str11.substr(58, 5)),
-      zRate: parseInt(str11.substr(62, 5)),
-      xlen: parseFloat(str11.substr(73, 10)),
-      ylen: parseFloat(str11.substr(83, 10)),
-      zlen: parseFloat(str11.substr(93, 10)),
-      alpha: parseFloat(str11.substr(103, 10)),
-      beta: parseFloat(str11.substr(113, 10)),
-      gamma: parseFloat(str11.substr(123, 10)),
-      divisor: parseFloat(str11.substr(138, 12)),
-      summand: parseInt(str11.substr(155, 8)),
-      sigma: parseFloat(str11.substr(170, 12))
-    };
-  }
-  function parseDsn6Header(buffer, littleEndian) {
-    const readInt = littleEndian ? (o) => buffer.readInt16LE(o * 2) : (o) => buffer.readInt16BE(o * 2);
-    const factor = 1 / readInt(17);
-    return {
-      xStart: readInt(0),
-      yStart: readInt(1),
-      zStart: readInt(2),
-      xExtent: readInt(3),
-      yExtent: readInt(4),
-      zExtent: readInt(5),
-      xRate: readInt(6),
-      yRate: readInt(7),
-      zRate: readInt(8),
-      xlen: readInt(9) * factor,
-      ylen: readInt(10) * factor,
-      zlen: readInt(11) * factor,
-      alpha: readInt(12) * factor,
-      beta: readInt(13) * factor,
-      gamma: readInt(14) * factor,
-      divisor: readInt(15) / 100,
-      summand: readInt(16),
-      sigma: void 0
-    };
-  }
-  function getBlocks(header2) {
-    const { xExtent, yExtent, zExtent } = header2;
-    const xBlocks = Math.ceil(xExtent / 8);
-    const yBlocks = Math.ceil(yExtent / 8);
-    const zBlocks = Math.ceil(zExtent / 8);
-    return { xBlocks, yBlocks, zBlocks };
-  }
-  async function readDsn6Header(file) {
-    const { buffer } = await file.readBuffer(0, dsn6HeaderSize);
-    const brixStr = String.fromCharCode.apply(null, buffer);
-    const isBrix = brixStr.startsWith(":-)");
-    const littleEndian = isBrix || buffer.readInt16LE(18 * 2) === 100;
-    const header2 = isBrix ? parseBrixHeader(brixStr) : parseDsn6Header(buffer, littleEndian);
-    return { header: header2, littleEndian };
-  }
-  async function parseDsn6Values(header2, source, target, littleEndian) {
-    if (!littleEndian) {
-      SimpleBuffer.flipByteOrderInPlace2(source.buffer);
-    }
-    const { divisor, summand, xExtent, yExtent, zExtent } = header2;
-    const { xBlocks, yBlocks, zBlocks } = getBlocks(header2);
-    let offset2 = 0;
-    for (let zz = 0; zz < zBlocks; ++zz) {
-      for (let yy = 0; yy < yBlocks; ++yy) {
-        for (let xx = 0; xx < xBlocks; ++xx) {
-          for (let k = 0; k < 8; ++k) {
-            const z = 8 * zz + k;
-            for (let j = 0; j < 8; ++j) {
-              const y = 8 * yy + j;
-              for (let i = 0; i < 8; ++i) {
-                const x = 8 * xx + i;
-                if (x < xExtent && y < yExtent && z < zExtent) {
-                  const idx = (x * yExtent + y) * zExtent + z;
-                  target[idx] = (source[offset2] - summand) / divisor;
-                  ++offset2;
-                } else {
-                  offset2 += 8 - i;
-                  break;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  function getDsn6Counts(header2) {
-    const { xExtent, yExtent, zExtent } = header2;
-    const { xBlocks, yBlocks, zBlocks } = getBlocks(header2);
-    const valueCount = xExtent * yExtent * zExtent;
-    const count3 = xBlocks * 8 * yBlocks * 8 * zBlocks * 8;
-    const elementByteSize = 1;
-    const byteCount = count3 * elementByteSize;
-    return { count: count3, byteCount, valueCount };
-  }
-  async function parseInternal3(file, size4, ctx) {
-    await ctx.update({ message: "Parsing DSN6/BRIX file..." });
-    const { header: header2, littleEndian } = await readDsn6Header(file);
-    const { buffer } = await file.readBuffer(dsn6HeaderSize, size4 - dsn6HeaderSize);
-    const { valueCount } = getDsn6Counts(header2);
-    const values2 = new Float32Array(valueCount);
-    await parseDsn6Values(header2, buffer, values2, littleEndian);
-    const result2 = { header: header2, values: values2, name: file.name };
-    return result2;
-  }
-  function parseFile2(file, size4) {
-    return Task.create("Parse DSN6/BRIX", async (ctx) => {
-      try {
-        return ReaderResult.success(await parseInternal3(file, size4, ctx));
-      } catch (e) {
-        return ReaderResult.error(e);
-      }
-    });
-  }
-  function parse3(buffer, name) {
-    return parseFile2(FileHandle.fromBuffer(SimpleBuffer.fromUint8Array(buffer), name), buffer.length);
-  }
-  var dsn6HeaderSize;
-  var init_parser5 = __esm({
-    "node_modules/molstar/lib/mol-io/reader/dsn6/parser.js"() {
-      init_mol_task();
-      init_result();
-      init_file_handle();
-      init_simple_buffer();
-      dsn6HeaderSize = 512;
-    }
-  });
-
-  // node_modules/molstar/lib/mol-io/reader/ply/schema.js
-  function PlyType(str11) {
-    if (!PlyTypes.has(str11))
-      throw new Error(`unknown ply type '${str11}'`);
-    return str11;
-  }
-  function PlyFile(elements, elementNames, comments) {
-    const elementMap = /* @__PURE__ */ new Map();
-    for (let i = 0, il = elementNames.length; i < il; ++i) {
-      elementMap.set(elementNames[i], elements[i]);
-    }
-    return {
-      comments,
-      elementNames,
-      getElement: (name) => {
-        return elementMap.get(name);
-      }
-    };
-  }
-  var PlyTypeByteLength, PlyTypes;
-  var init_schema4 = __esm({
-    "node_modules/molstar/lib/mol-io/reader/ply/schema.js"() {
-      PlyTypeByteLength = {
-        "char": 1,
-        "uchar": 1,
-        "short": 2,
-        "ushort": 2,
-        "int": 4,
-        "uint": 4,
-        "float": 4,
-        "double": 8,
-        "int8": 1,
-        "uint8": 1,
-        "int16": 2,
-        "uint16": 2,
-        "int32": 4,
-        "uint32": 4,
-        "float32": 4,
-        "float64": 8
-      };
-      PlyTypes = new Set(Object.keys(PlyTypeByteLength));
-    }
-  });
-
-  // node_modules/molstar/lib/mol-io/reader/ply/parser.js
-  function State3(data, runtimeCtx) {
-    const tokenizer = Tokenizer(data);
-    return {
-      data,
-      tokenizer,
-      runtimeCtx,
-      comments: [],
-      elementSpecs: [],
-      elements: []
-    };
-  }
-  function markHeader(tokenizer) {
-    const endHeaderIndex = tokenizer.data.indexOf("end_header", tokenizer.position);
-    if (endHeaderIndex === -1)
-      throw new Error(`no 'end_header' record found`);
-    tokenizer.tokenStart = tokenizer.position;
-    tokenizer.tokenEnd = endHeaderIndex;
-    tokenizer.position = endHeaderIndex;
-    Tokenizer.eatLine(tokenizer);
-  }
-  function parseHeader(state) {
-    const { tokenizer, comments, elementSpecs } = state;
-    markHeader(tokenizer);
-    const headerLines = Tokenizer.getTokenString(tokenizer).split(/\r?\n/);
-    if (headerLines[0] !== "ply")
-      throw new Error(`data not starting with 'ply'`);
-    if (headerLines[1] !== "format ascii 1.0")
-      throw new Error(`format not 'ascii 1.0'`);
-    let currentName;
-    let currentCount;
-    let currentProperties;
-    function addCurrentElementSchema() {
-      if (currentName !== void 0 && currentCount !== void 0 && currentProperties !== void 0) {
-        let isList2 = false;
-        for (let i = 0, il = currentProperties.length; i < il; ++i) {
-          const p3 = currentProperties[i];
-          if (p3.kind === "list") {
-            isList2 = true;
-            break;
-          }
-        }
-        if (isList2 && currentProperties.length !== 1) {
-        }
-        if (isList2) {
-          elementSpecs.push({
-            kind: "list",
-            name: currentName,
-            count: currentCount,
-            property: currentProperties[0]
-          });
-        } else {
-          elementSpecs.push({
-            kind: "table",
-            name: currentName,
-            count: currentCount,
-            properties: currentProperties
-          });
-        }
-      }
-    }
-    for (let i = 2, il = headerLines.length; i < il; ++i) {
-      const l = headerLines[i];
-      const ls = l.split(" ");
-      if (l.startsWith("comment")) {
-        comments.push(l.substr(8));
-      } else if (l.startsWith("element")) {
-        addCurrentElementSchema();
-        currentProperties = [];
-        currentName = ls[1];
-        currentCount = parseInt(ls[2]);
-      } else if (l.startsWith("property")) {
-        if (currentProperties === void 0)
-          throw new Error(`properties outside of element`);
-        if (ls[1] === "list") {
-          currentProperties.push({
-            kind: "list",
-            countType: PlyType(ls[2]),
-            dataType: PlyType(ls[3]),
-            name: ls[4]
-          });
-        } else {
-          currentProperties.push({
-            kind: "column",
-            type: PlyType(ls[1]),
-            name: ls[2]
-          });
-        }
-      } else if (l.startsWith("end_header")) {
-        addCurrentElementSchema();
-      } else {
-        console.warn("unknown header line");
-      }
-    }
-  }
-  function parseElements(state) {
-    const { elementSpecs } = state;
-    for (let i = 0, il = elementSpecs.length; i < il; ++i) {
-      const spec = elementSpecs[i];
-      if (spec.kind === "table")
-        parseTableElement(state, spec);
-      else if (spec.kind === "list")
-        parseListElement(state, spec);
-    }
-  }
-  function getColumnSchema(type3) {
-    switch (type3) {
-      case "char":
-      case "uchar":
-      case "int8":
-      case "uint8":
-      case "short":
-      case "ushort":
-      case "int16":
-      case "uint16":
-      case "int":
-      case "uint":
-      case "int32":
-      case "uint32":
-        return Column.Schema.int;
-      case "float":
-      case "double":
-      case "float32":
-      case "float64":
-        return Column.Schema.float;
-    }
-  }
-  function parseTableElement(state, spec) {
-    const { elements, tokenizer } = state;
-    const { count: count3, properties: properties4 } = spec;
-    const propertyCount = properties4.length;
-    const propertyNames = [];
-    const propertyTypes = [];
-    const propertyTokens = [];
-    const propertyColumns = /* @__PURE__ */ new Map();
-    for (let i = 0, il = propertyCount; i < il; ++i) {
-      const tokens = TokenBuilder.create(tokenizer.data, count3 * 2);
-      propertyTokens.push(tokens);
-    }
-    for (let i = 0, il = count3; i < il; ++i) {
-      for (let j = 0, jl = propertyCount; j < jl; ++j) {
-        Tokenizer.skipWhitespace(tokenizer);
-        Tokenizer.markStart(tokenizer);
-        Tokenizer.eatValue(tokenizer);
-        TokenBuilder.addUnchecked(propertyTokens[j], tokenizer.tokenStart, tokenizer.tokenEnd);
-      }
-    }
-    for (let i = 0, il = propertyCount; i < il; ++i) {
-      const { type: type3, name } = properties4[i];
-      const column = TokenColumn(propertyTokens[i], getColumnSchema(type3));
-      propertyNames.push(name);
-      propertyTypes.push(type3);
-      propertyColumns.set(name, column);
-    }
-    elements.push({
-      kind: "table",
-      rowCount: count3,
-      propertyNames,
-      propertyTypes,
-      getProperty: (name) => propertyColumns.get(name)
-    });
-  }
-  function parseListElement(state, spec) {
-    const { elements, tokenizer } = state;
-    const { count: count3, property: property2 } = spec;
-    const tokens = TokenBuilder.create(tokenizer.data, count3 * 2 * 3);
-    const offsets = new Uint32Array(count3 + 1);
-    let entryCount = 0;
-    for (let i = 0, il = count3; i < il; ++i) {
-      Tokenizer.skipWhitespace(tokenizer);
-      Tokenizer.markStart(tokenizer);
-      while (Tokenizer.skipWhitespace(tokenizer) !== 10) {
-        ++entryCount;
-        Tokenizer.markStart(tokenizer);
-        Tokenizer.eatValue(tokenizer);
-        TokenBuilder.addToken(tokens, tokenizer);
-      }
-      offsets[i + 1] = entryCount;
-    }
-    const listValue = {
-      entries: [],
-      count: 0
-    };
-    const column = TokenColumn(tokens, getColumnSchema(property2.dataType));
-    elements.push({
-      kind: "list",
-      rowCount: count3,
-      name: property2.name,
-      type: property2.dataType,
-      value: (row) => {
-        const offset2 = offsets[row] + 1;
-        const count4 = column.value(offset2 - 1);
-        for (let i = offset2, il = offset2 + count4; i < il; ++i) {
-          listValue.entries[i - offset2] = column.value(i);
-        }
-        listValue.count = count4;
-        return listValue;
-      }
-    });
-  }
-  async function parseInternal4(data, ctx) {
-    const state = State3(data, ctx);
-    ctx.update({ message: "Parsing...", current: 0, max: data.length });
-    parseHeader(state);
-    parseElements(state);
-    const { elements, elementSpecs, comments } = state;
-    const elementNames = elementSpecs.map((s) => s.name);
-    const result2 = PlyFile(elements, elementNames, comments);
-    return ReaderResult.success(result2);
-  }
-  function parsePly(data) {
-    return Task.create("Parse PLY", async (ctx) => {
-      return await parseInternal4(data, ctx);
-    });
-  }
-  var init_parser6 = __esm({
-    "node_modules/molstar/lib/mol-io/reader/ply/parser.js"() {
-      init_result();
-      init_mol_task();
-      init_schema4();
-      init_tokenizer();
-      init_db();
-      init_token();
-    }
-  });
-
-  // node_modules/molstar/lib/mol-io/reader/psf/parser.js
-  function State4(tokenizer, runtimeCtx) {
-    return {
-      tokenizer,
-      runtimeCtx
-    };
-  }
-  async function handleAtoms(state, count3) {
-    const { tokenizer } = state;
-    const atomId = TokenBuilder.create(tokenizer.data, count3 * 2);
-    const segmentName = TokenBuilder.create(tokenizer.data, count3 * 2);
-    const residueId = TokenBuilder.create(tokenizer.data, count3 * 2);
-    const residueName = TokenBuilder.create(tokenizer.data, count3 * 2);
-    const atomName = TokenBuilder.create(tokenizer.data, count3 * 2);
-    const atomType = TokenBuilder.create(tokenizer.data, count3 * 2);
-    const charge = TokenBuilder.create(tokenizer.data, count3 * 2);
-    const mass = TokenBuilder.create(tokenizer.data, count3 * 2);
-    const { position } = tokenizer;
-    const line = readLine(tokenizer).trim();
-    tokenizer.position = position;
-    const isLammpsFull = line.split(reWhitespace).length === 7;
-    const n = isLammpsFull ? 6 : 8;
-    const { length } = tokenizer;
-    let linesAlreadyRead = 0;
-    await chunkedSubtask(state.runtimeCtx, 1e5, void 0, (chunkSize) => {
-      const linesToRead = Math.min(count3 - linesAlreadyRead, chunkSize);
-      for (let i = 0; i < linesToRead; ++i) {
-        for (let j = 0; j < n; ++j) {
-          skipWhitespace2(tokenizer);
-          markStart(tokenizer);
-          eatValue2(tokenizer);
-          if (isLammpsFull) {
-            switch (j) {
-              case 0:
-                TokenBuilder.addUnchecked(atomId, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-              case 1:
-                TokenBuilder.addUnchecked(residueId, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-              case 2:
-                TokenBuilder.addUnchecked(atomName, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-              case 3:
-                TokenBuilder.addUnchecked(atomType, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-              case 4:
-                TokenBuilder.addUnchecked(charge, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-              case 5:
-                TokenBuilder.addUnchecked(mass, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-            }
-          } else {
-            switch (j) {
-              case 0:
-                TokenBuilder.addUnchecked(atomId, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-              case 1:
-                TokenBuilder.addUnchecked(segmentName, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-              case 2:
-                TokenBuilder.addUnchecked(residueId, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-              case 3:
-                TokenBuilder.addUnchecked(residueName, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-              case 4:
-                TokenBuilder.addUnchecked(atomName, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-              case 5:
-                TokenBuilder.addUnchecked(atomType, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-              case 6:
-                TokenBuilder.addUnchecked(charge, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-              case 7:
-                TokenBuilder.addUnchecked(mass, tokenizer.tokenStart, tokenizer.tokenEnd);
-                break;
-            }
-          }
-        }
-        eatLine(tokenizer);
-        markStart(tokenizer);
-      }
-      linesAlreadyRead += linesToRead;
-      return linesToRead;
-    }, (ctx) => ctx.update({ message: "Parsing...", current: tokenizer.position, max: length }));
-    return {
-      count: count3,
-      atomId: TokenColumnProvider(atomId)(Column.Schema.int),
-      segmentName: isLammpsFull ? TokenColumnProvider(residueId)(Column.Schema.str) : TokenColumnProvider(segmentName)(Column.Schema.str),
-      residueId: TokenColumnProvider(residueId)(Column.Schema.int),
-      residueName: isLammpsFull ? TokenColumnProvider(residueId)(Column.Schema.str) : TokenColumnProvider(residueName)(Column.Schema.str),
-      atomName: TokenColumnProvider(atomName)(Column.Schema.str),
-      atomType: TokenColumnProvider(atomType)(Column.Schema.str),
-      charge: TokenColumnProvider(charge)(Column.Schema.float),
-      mass: TokenColumnProvider(mass)(Column.Schema.float)
-    };
-  }
-  async function handleBonds(state, count3) {
-    const { tokenizer } = state;
-    const atomIdA = TokenBuilder.create(tokenizer.data, count3 * 2);
-    const atomIdB = TokenBuilder.create(tokenizer.data, count3 * 2);
-    const { length } = tokenizer;
-    let bondsAlreadyRead = 0;
-    await chunkedSubtask(state.runtimeCtx, 10, void 0, (chunkSize) => {
-      const bondsToRead = Math.min(count3 - bondsAlreadyRead, chunkSize);
-      for (let i = 0; i < bondsToRead; ++i) {
-        for (let j = 0; j < 2; ++j) {
-          skipWhitespace2(tokenizer);
-          markStart(tokenizer);
-          eatValue2(tokenizer);
-          switch (j) {
-            case 0:
-              TokenBuilder.addUnchecked(atomIdA, tokenizer.tokenStart, tokenizer.tokenEnd);
-              break;
-            case 1:
-              TokenBuilder.addUnchecked(atomIdB, tokenizer.tokenStart, tokenizer.tokenEnd);
-              break;
-          }
-        }
-      }
-      bondsAlreadyRead += bondsToRead;
-      return bondsToRead;
-    }, (ctx) => ctx.update({ message: "Parsing...", current: tokenizer.position, max: length }));
-    return {
-      count: count3,
-      atomIdA: TokenColumnProvider(atomIdA)(Column.Schema.int),
-      atomIdB: TokenColumnProvider(atomIdB)(Column.Schema.int)
-    };
-  }
-  function parseTitle(state, count3) {
-    const title = [];
-    for (let i = 0; i < count3; ++i) {
-      const line = readLine(state.tokenizer);
-      title.push(line.replace(reTitle, "").trim());
-    }
-    return title;
-  }
-  async function parseInternal5(data, ctx) {
-    const tokenizer = Tokenizer(data);
-    const state = State4(tokenizer, ctx);
-    let title = void 0;
-    let atoms2 = void 0;
-    let bonds = void 0;
-    const id = readLine(state.tokenizer).trim();
-    while (tokenizer.tokenEnd < tokenizer.length) {
-      const line = readLine(state.tokenizer).trim();
-      if (line.includes("!NTITLE")) {
-        const numTitle = parseInt(line.split(reWhitespace)[0]);
-        title = parseTitle(state, numTitle);
-      } else if (line.includes("!NATOM")) {
-        const numAtoms = parseInt(line.split(reWhitespace)[0]);
-        atoms2 = await handleAtoms(state, numAtoms);
-      } else if (line.includes("!NBOND")) {
-        const numBonds = parseInt(line.split(reWhitespace)[0]);
-        bonds = await handleBonds(state, numBonds);
-        break;
-      } else if (line.includes("!NTHETA")) {
-      } else if (line.includes("!NPHI")) {
-      } else if (line.includes("!NIMPHI")) {
-      } else if (line.includes("!NDON")) {
-      } else if (line.includes("!NACC")) {
-      } else if (line.includes("!NNB")) {
-      } else if (line.includes("!NGRP NST2")) {
-      } else if (line.includes("!MOLNT")) {
-      } else if (line.includes("!NUMLP NUMLPH")) {
-      } else if (line.includes("!NCRTERM")) {
-      }
-    }
-    if (title === void 0) {
-      title = [];
-    }
-    if (atoms2 === void 0) {
-      return ReaderResult.error("no atoms data");
-    }
-    if (bonds === void 0) {
-      return ReaderResult.error("no bonds data");
-    }
-    const result2 = {
-      id,
-      title,
-      atoms: atoms2,
-      bonds
-    };
-    return ReaderResult.success(result2);
-  }
-  function parsePsf(data) {
-    return Task.create("Parse PSF", async (ctx) => {
-      return await parseInternal5(data, ctx);
-    });
-  }
-  var readLine, skipWhitespace2, eatValue2, eatLine, markStart, reWhitespace, reTitle;
-  var init_parser7 = __esm({
-    "node_modules/molstar/lib/mol-io/reader/psf/parser.js"() {
-      init_mol_task();
-      init_tokenizer();
-      init_result();
-      init_token();
-      init_db();
-      ({ readLine, skipWhitespace: skipWhitespace2, eatValue: eatValue2, eatLine, markStart } = Tokenizer);
-      reWhitespace = /\s+/;
-      reTitle = /(^\*|REMARK)*/;
-    }
-  });
-
   // node_modules/molstar/lib/mol-io/reader/cube/parser.js
   function readHeader(tokenizer) {
     const headerLines = Tokenizer.readLines(tokenizer, 6);
@@ -54928,7 +61076,7 @@ ${subTree.join("\n")}`;
     });
   }
   var bohrToAngstromFactor;
-  var init_parser8 = __esm({
+  var init_parser12 = __esm({
     "node_modules/molstar/lib/mol-io/reader/cube/parser.js"() {
       init_linear_algebra();
       init_tokenizer();
@@ -55019,7 +61167,7 @@ ${subTree.join("\n")}`;
       return parseBinary(taskCtx, data, name);
     });
   }
-  var init_parser9 = __esm({
+  var init_parser13 = __esm({
     "node_modules/molstar/lib/mol-io/reader/dx/parser.js"() {
       init_linear_algebra();
       init_mol_task();
@@ -55028,178 +61176,6 @@ ${subTree.join("\n")}`;
       init_number_parser();
       init_tokenizer();
       init_result();
-    }
-  });
-
-  // node_modules/molstar/lib/mol-util/color/names.js
-  var ColorNames, ColorNamesValueMap;
-  var init_names = __esm({
-    "node_modules/molstar/lib/mol-util/color/names.js"() {
-      init_color();
-      ColorNames = ColorMap({
-        aliceblue: 15792383,
-        antiquewhite: 16444375,
-        aqua: 65535,
-        aquamarine: 8388564,
-        azure: 15794175,
-        beige: 16119260,
-        bisque: 16770244,
-        black: 0,
-        blanchedalmond: 16772045,
-        blue: 255,
-        blueviolet: 9055202,
-        brown: 10824234,
-        burlywood: 14596231,
-        cadetblue: 6266528,
-        chartreuse: 8388352,
-        chocolate: 13789470,
-        coral: 16744272,
-        cornflower: 6591981,
-        cornflowerblue: 6591981,
-        cornsilk: 16775388,
-        crimson: 14423100,
-        cyan: 65535,
-        darkblue: 139,
-        darkcyan: 35723,
-        darkgoldenrod: 12092939,
-        darkgray: 11119017,
-        darkgreen: 25600,
-        darkgrey: 11119017,
-        darkkhaki: 12433259,
-        darkmagenta: 9109643,
-        darkolivegreen: 5597999,
-        darkorange: 16747520,
-        darkorchid: 10040012,
-        darkred: 9109504,
-        darksalmon: 15308410,
-        darkseagreen: 9419919,
-        darkslateblue: 4734347,
-        darkslategray: 3100495,
-        darkslategrey: 3100495,
-        darkturquoise: 52945,
-        darkviolet: 9699539,
-        deeppink: 16716947,
-        deepskyblue: 49151,
-        dimgray: 6908265,
-        dimgrey: 6908265,
-        dodgerblue: 2003199,
-        firebrick: 11674146,
-        floralwhite: 16775920,
-        forestgreen: 2263842,
-        fuchsia: 16711935,
-        gainsboro: 14474460,
-        ghostwhite: 16316671,
-        gold: 16766720,
-        goldenrod: 14329120,
-        gray: 8421504,
-        green: 32768,
-        greenyellow: 11403055,
-        grey: 8421504,
-        honeydew: 15794160,
-        hotpink: 16738740,
-        indianred: 13458524,
-        indigo: 4915330,
-        ivory: 16777200,
-        khaki: 15787660,
-        laserlemon: 16777044,
-        lavender: 15132410,
-        lavenderblush: 16773365,
-        lawngreen: 8190976,
-        lemonchiffon: 16775885,
-        lightblue: 11393254,
-        lightcoral: 15761536,
-        lightcyan: 14745599,
-        lightgoldenrod: 16448210,
-        lightgoldenrodyellow: 16448210,
-        lightgray: 13882323,
-        lightgreen: 9498256,
-        lightgrey: 13882323,
-        lightpink: 16758465,
-        lightsalmon: 16752762,
-        lightseagreen: 2142890,
-        lightskyblue: 8900346,
-        lightslategray: 7833753,
-        lightslategrey: 7833753,
-        lightsteelblue: 11584734,
-        lightyellow: 16777184,
-        lime: 65280,
-        limegreen: 3329330,
-        linen: 16445670,
-        magenta: 16711935,
-        maroon: 8388608,
-        maroon2: 8323072,
-        maroon3: 11546720,
-        mediumaquamarine: 6737322,
-        mediumblue: 205,
-        mediumorchid: 12211667,
-        mediumpurple: 9662683,
-        mediumseagreen: 3978097,
-        mediumslateblue: 8087790,
-        mediumspringgreen: 64154,
-        mediumturquoise: 4772300,
-        mediumvioletred: 13047173,
-        midnightblue: 1644912,
-        mintcream: 16121850,
-        mistyrose: 16770273,
-        moccasin: 16770229,
-        navajowhite: 16768685,
-        navy: 128,
-        oldlace: 16643558,
-        olive: 8421376,
-        olivedrab: 7048739,
-        orange: 16753920,
-        orangered: 16729344,
-        orchid: 14315734,
-        palegoldenrod: 15657130,
-        palegreen: 10025880,
-        paleturquoise: 11529966,
-        palevioletred: 14381203,
-        papayawhip: 16773077,
-        peachpuff: 16767673,
-        peru: 13468991,
-        pink: 16761035,
-        plum: 14524637,
-        powderblue: 11591910,
-        purple: 8388736,
-        purple2: 8323199,
-        purple3: 10494192,
-        rebeccapurple: 6697881,
-        red: 16711680,
-        rosybrown: 12357519,
-        royalblue: 4286945,
-        saddlebrown: 9127187,
-        salmon: 16416882,
-        sandybrown: 16032864,
-        seagreen: 3050327,
-        seashell: 16774638,
-        sienna: 10506797,
-        silver: 12632256,
-        skyblue: 8900331,
-        slateblue: 6970061,
-        slategray: 7372944,
-        slategrey: 7372944,
-        snow: 16775930,
-        springgreen: 65407,
-        steelblue: 4620980,
-        tan: 13808780,
-        teal: 32896,
-        thistle: 14204888,
-        tomato: 16737095,
-        turquoise: 4251856,
-        violet: 15631086,
-        wheat: 16113331,
-        white: 16777215,
-        whitesmoke: 16119285,
-        yellow: 16776960,
-        yellowgreen: 10145074
-      });
-      ColorNamesValueMap = (function() {
-        const map3 = /* @__PURE__ */ new Map();
-        Object.keys(ColorNames).forEach((name) => {
-          map3.set(ColorNames[name], name);
-        });
-        return map3;
-      })();
     }
   });
 
@@ -55325,7 +61301,7 @@ ${subTree.join("\n")}`;
     });
   }
   var Pointers, PointersNames, readLine2, markLine, trim;
-  var init_parser10 = __esm({
+  var init_parser14 = __esm({
     "node_modules/molstar/lib/mol-io/reader/prmtop/parser.js"() {
       init_mol_task();
       init_tokenizer();
@@ -55612,7 +61588,7 @@ ${subTree.join("\n")}`;
     });
   }
   var AtomsSchema2, BondsSchema, MoleculesSchema, readLine3, markLine2, skipWhitespace3, markStart2, eatValue3, eatLine2, reField, reWhitespace2;
-  var init_parser11 = __esm({
+  var init_parser15 = __esm({
     "node_modules/molstar/lib/mol-io/reader/top/parser.js"() {
       init_mol_task();
       init_tokenizer();
@@ -55667,25 +61643,25 @@ ${subTree.join("\n")}`;
     ReadFile: () => ReadFile
   });
   var Download, DownloadBlob, DeflateData, RawData, ReadFile, ParseBlob, ParseCif, ParseCube, ParsePsf, ParsePrmtop, ParseTop, ParsePly, ParseCcp4, ParseDsn6, ParseDx, ImportString, ImportJson, ParseJson, LazyVolume;
-  var init_data3 = __esm({
+  var init_data4 = __esm({
     "node_modules/molstar/lib/mol-plugin-state/transforms/data.js"() {
-      init_parser4();
+      init_parser8();
       init_cif2();
-      init_parser5();
-      init_parser6();
-      init_parser7();
+      init_parser9();
+      init_parser10();
+      init_parser11();
       init_mol_state();
       init_mol_task();
       init_data_source();
       init_param_definition();
       init_objects();
       init_assets();
-      init_parser8();
-      init_parser9();
+      init_parser12();
+      init_parser13();
       init_names();
       init_type_helpers();
-      init_parser10();
-      init_parser11();
+      init_parser14();
+      init_parser15();
       init_zip();
       init_string_like();
       init_utf8();
@@ -56032,7 +62008,7 @@ ${subTree.join("\n")}`;
       })({
         apply({ a: a5 }) {
           return Task.create("Parse CCP4/MRC/MAP", async (ctx) => {
-            const parsed = await parse2(a5.data, a5.label).runInContext(ctx);
+            const parsed = await parse3(a5.data, a5.label).runInContext(ctx);
             if (parsed.isError)
               throw new Error(parsed.message);
             return new PluginStateObject.Format.Ccp4(parsed.result);
@@ -56047,7 +62023,7 @@ ${subTree.join("\n")}`;
       })({
         apply({ a: a5 }) {
           return Task.create("Parse DSN6/BRIX", async (ctx) => {
-            const parsed = await parse3(a5.data, a5.label).runInContext(ctx);
+            const parsed = await parse4(a5.data, a5.label).runInContext(ctx);
             if (parsed.isError)
               throw new Error(parsed.message);
             return new PluginStateObject.Format.Dsn6(parsed.result);
@@ -56316,7 +62292,7 @@ ${subTree.join("\n")}`;
       }
     });
   }
-  var init_parser12 = __esm({
+  var init_parser16 = __esm({
     "node_modules/molstar/lib/mol-io/reader/dcd/parser.js"() {
       init_result();
       init_mol_task();
@@ -56467,7 +62443,7 @@ ${subTree.join("\n")}`;
       return await parseInternal8(data, ctx);
     });
   }
-  var init_parser13 = __esm({
+  var init_parser17 = __esm({
     "node_modules/molstar/lib/mol-io/reader/gro/parser.js"() {
       init_db();
       init_tokenizer();
@@ -56478,14 +62454,14 @@ ${subTree.join("\n")}`;
   });
 
   // node_modules/molstar/lib/mol-io/reader/pdb/parser.js
-  function parsePDB(data, id, isPdbqt = false) {
+  function parsePDB(data, id, variant) {
     return Task.create("Parse PDB", async (ctx) => ReaderResult.success({
       lines: await Tokenizer.readAllLinesAsync(data, ctx),
       id,
-      isPdbqt
+      variant: variant || "pdb"
     }));
   }
-  var init_parser14 = __esm({
+  var init_parser18 = __esm({
     "node_modules/molstar/lib/mol-io/reader/pdb/parser.js"() {
       init_mol_task();
       init_result();
@@ -56930,14 +62906,15 @@ if (uFog) {
     "node_modules/molstar/lib/mol-gl/shader/chunks/apply-interior-color.glsl.js"() {
       apply_interior_color = `
 if (interior) {
-    if (uInteriorColorFlag) {
-        gl_FragColor.rgb = uInteriorColor;
-    } else {
-        gl_FragColor.rgb *= 1.0 - uInteriorDarkening;
-    }
+    material.rgb = mix(material.rgb, uInteriorColor.rgb, uInteriorColor.a);
+
+    float isf = clamp(uInteriorSubstance.a, 0.0, 0.99); // clamp to avoid artifacts
+    metalness = mix(metalness, uInteriorSubstance.r, isf);
+    roughness = mix(roughness, uInteriorSubstance.g, isf);
+    bumpiness = mix(bumpiness, uInteriorSubstance.b, isf);
 
     #ifdef dTransparentBackfaces_opaque
-        gl_FragColor.a = 1.0;
+        material.a = 1.0;
     #endif
 }
 `;
@@ -57445,9 +63422,13 @@ gl_Position = uProjection * mvPosition;
     float size = unpackRGBToInt(readFromTexture(tSize, group, uSizeTexDim).rgb);
 #elif defined(dSizeType_groupInstance)
     float size = unpackRGBToInt(readFromTexture(tSize, aInstance * float(uGroupCount) + group, uSizeTexDim).rgb);
+#elif defined(dSizeType_vertex)
+    float size = unpackRGBToInt(readFromTexture(tSize, vertexId, uSizeTexDim).rgb);
+#elif defined(dSizeType_vertexInstance)
+    float size = unpackRGBToInt(readFromTexture(tSize, int(aInstance) * uVertexCount + vertexId, uSizeTexDim).rgb);
 #endif
 
-#if defined(dSizeType_instance) || defined(dSizeType_group) || defined(dSizeType_groupInstance)
+#if defined(dSizeType_instance) || defined(dSizeType_group) || defined(dSizeType_groupInstance) || defined(dSizeType_vertex) || defined(dSizeType_vertexInstance)
     size /= 100.0; // NOTE factor also set in TypeScript
 #endif
 
@@ -57931,9 +63912,6 @@ uniform float uPickingAlphaThreshold;
 uniform bool uTransparentBackground;
 
 uniform bool uDoubleSided;
-uniform float uInteriorDarkening;
-uniform bool uInteriorColorFlag;
-uniform vec3 uInteriorColor;
 bool interior;
 
 uniform float uXrayEdgeFalloff;
@@ -58751,7 +64729,7 @@ vec4 readFromTexture(const in sampler2D tex, const in int i, const in vec2 dim) 
     uniform float uSize;
 #elif defined(dSizeType_attribute)
     attribute float aSize;
-#elif defined(dSizeType_instance) || defined(dSizeType_group) || defined(dSizeType_groupInstance)
+#elif defined(dSizeType_instance) || defined(dSizeType_group) || defined(dSizeType_groupInstance) || defined(dSizeType_vertex) || defined(dSizeType_vertexInstance)
     uniform vec2 uSizeTexDim;
     uniform sampler2D tSize;
 #endif
@@ -59269,6 +65247,9 @@ precision highp int;
 uniform mat4 uInvView;
 uniform float uAlphaThickness;
 
+uniform vec4 uInteriorColor;
+uniform vec4 uInteriorSubstance;
+
 varying float vRadius;
 varying vec3 vPoint;
 varying vec3 vPointViewPosition;
@@ -59323,6 +65304,11 @@ bool SphereImpostor(out vec3 modelPos, out vec3 cameraPos, out vec3 cameraNormal
                 if (!objectClipped) {
                     fragmentDepth = 0.0 + (0.0000001 / vRadius);
                     cameraNormal = -mix(normalize(vPoint), vec3(0.0, 0.0, -1.0), uIsOrtho);
+
+                    // intersection of ray with near plane
+                    float nearT = - (uNear + dot(rayOrigin, vec3(0.0, 0.0, 1.0))) / dot(rayDirection, vec3(0.0, 0.0, 1.0));
+                    cameraPos = rayDirection * nearT + rayOrigin;
+                    modelPos = (uInvView * vec4(cameraPos, 1.0)).xyz;
                 }
             #endif
             return true;
@@ -59397,8 +65383,8 @@ void main(void){
     #elif defined(dRenderVariant_emissive)
         gl_FragColor = material;
     #elif defined(dRenderVariant_color) || defined(dRenderVariant_tracing)
-        #include apply_light_color
         #include apply_interior_color
+        #include apply_light_color
         #include apply_marker_color
 
         #if defined(dRenderVariant_color)
@@ -59535,6 +65521,9 @@ varying float vCap;
 uniform vec3 uCameraDir;
 uniform vec3 uCameraPosition;
 uniform mat4 uInvView;
+
+uniform vec4 uInteriorColor;
+uniform vec4 uInteriorSubstance;
 
 #include common
 #include common_frag_params
@@ -59690,6 +65679,13 @@ bool CylinderImpostor(
                     if (!objectClipped) {
                         fragmentDepth = 0.0 + (0.0000002 / vSize);
                         cameraNormal = -rayDir;
+
+                        // intersection of ray in model space with near plane in camera space
+                        vec3 cameraRayOrigin = (uView * vec4(rayOrigin, 1.0)).xyz;
+                        vec3 cameraRayDir = (uView * vec4(rayDir, 0.0)).xyz;
+                        float nearT = - (uNear + cameraRayOrigin.z) / cameraRayDir.z;
+                        viewPosition = cameraRayOrigin + nearT * cameraRayDir;
+                        modelPosition = (uInvView * vec4(viewPosition, 1.0)).xyz;
                     }
                 #endif
                 return true;
@@ -59710,6 +65706,13 @@ bool CylinderImpostor(
                         if (!objectClipped) {
                             fragmentDepth = 0.0 + (0.0000002 / vSize);
                             cameraNormal = -rayDir;
+
+                            // intersection of ray in model space with near plane in camera space
+                            vec3 cameraRayOrigin = (uView * vec4(rayOrigin, 1.0)).xyz;
+                            vec3 cameraRayDir = (uView * vec4(rayDir, 0.0)).xyz;
+                            float nearT = - (uNear + cameraRayOrigin.z) / cameraRayDir.z;
+                            viewPosition = cameraRayOrigin + nearT * cameraRayDir;
+                            modelPosition = (uInvView * vec4(viewPosition, 1.0)).xyz;
                         }
                     #endif
                     return true;
@@ -59729,6 +65732,13 @@ bool CylinderImpostor(
                         if (!objectClipped) {
                             fragmentDepth = 0.0 + (0.0000002 / vSize);
                             cameraNormal = -rayDir;
+
+                            // intersection of ray in model space with near plane in camera space
+                            vec3 cameraRayOrigin = (uView * vec4(rayOrigin, 1.0)).xyz;
+                            vec3 cameraRayDir = (uView * vec4(rayDir, 0.0)).xyz;
+                            float nearT = - (uNear + cameraRayOrigin.z) / cameraRayDir.z;
+                            viewPosition = cameraRayOrigin + nearT * cameraRayDir;
+                            modelPosition = (uInvView * vec4(viewPosition, 1.0)).xyz;
                         }
                     #endif
                     return true;
@@ -59787,8 +65797,8 @@ void main() {
     #elif defined(dRenderVariant_emissive)
         gl_FragColor = material;
     #elif defined(dRenderVariant_color) || defined(dRenderVariant_tracing)
-        #include apply_light_color
         #include apply_interior_color
+        #include apply_light_color
         #include apply_marker_color
 
         #if defined(dRenderVariant_color)
@@ -59878,39 +65888,45 @@ void main(void){
     //     }
     // #endif
 
-    vec4 mvCorner = vec4(mvPosition.xyz, 1.0);
+    vec4 mvCenter = vec4(mvPosition.xyz, 1.0);
 
     if (vTexCoord.x == 10.0) { // indicates background plane
         // move a bit to the back, taking distance to camera into account to avoid z-fighting
-        offsetZ -= 0.001 * distance(uCameraPosition, (uProjection * mvCorner).xyz);
+        offsetZ -= 0.001 * distance(uCameraPosition, (uProjection * mvCenter).xyz);
     }
 
-    vec3 cornerOffset = vec3(0.0);
-    cornerOffset.xy += aMapping * size * scale;
-    cornerOffset.x += offsetX;
-    cornerOffset.y += offsetY;
-
-    if (uHasHeadRotation) {
-        mvCorner.xyz += (uInvHeadRotation * vec4(cornerOffset, 1.0)).xyz;
-    } else {
-        mvCorner.xyz += cornerOffset;
-    }
-
+    // apply Z offset in view space
     if (!uHasEyeCamera) {
         if (uIsOrtho == 1.0) {
-            mvCorner.z += offsetZ;
+            mvCenter.z += offsetZ;
         } else {
-            mvCorner.xyz += normalize(-mvCorner.xyz) * offsetZ;
+            mvCenter.xyz += normalize(-mvCenter.xyz) * offsetZ;
         }
     }
 
     if (uHasEyeCamera) {
-        mvCorner = uModelView * uInvModelViewEye * mvCorner;
+        mvCenter = uModelView * uInvModelViewEye * mvCenter;
     }
 
-    gl_Position = uProjection * mvCorner;
+    // project center to clip space
+    vec4 clip = uProjection * mvCenter;
 
-    vViewPosition = -mvCorner.xyz;
+    // compute corner offset in screen-space units
+    vec2 cornerOffset = aMapping * size * scale;
+    cornerOffset.x += offsetX;
+    cornerOffset.y += offsetY;
+
+    if (uHasHeadRotation) {
+        vec3 rotatedOffset = (uInvHeadRotation * vec4(cornerOffset, 0.0, 0.0)).xyz;
+        clip += uProjection * vec4(rotatedOffset, 0.0);
+    } else {
+        // apply offset in clip space to avoid perspective distortion on the quad
+        clip.xy += vec2(uProjection[0][0], uProjection[1][1]) * cornerOffset;
+    }
+
+    gl_Position = clip;
+
+    vViewPosition = -mvCenter.xyz;
 
     #include clip_instance
 }
@@ -59945,23 +65961,42 @@ void main(){
     #include clip_pixel
 
     float fragmentDepth = gl_FragCoord.z;
+
+    // determine if this is a background or glyph fragment
+    bool isBackground = vTexCoord.x > 1.0;
+
+    // discard background for non-visual variants (depth, pick, marking, emissive)
+    #if !defined(dRenderVariant_color) && !defined(dRenderVariant_tracing)
+        if (isBackground) discard;
+    #endif
+
+    // SDF test for glyph fragments \u2014 discard pixels outside glyph+border
+    float rawSdf = 0.0;
+    if (!isBackground) {
+        rawSdf = texture2D(tFont, vTexCoord).a;
+        float sdf = rawSdf + min(uBorderWidth, 0.49); // clamp to avoid exceeding max SDF range
+        if (sdf < 0.5) discard;
+    }
+
+    #ifdef enabledFragDepth
+        gl_FragDepthEXT = fragmentDepth;
+    #endif
+
     #include assign_material_color
 
-    if (vTexCoord.x > 1.0) {
+    if (isBackground) {
         #if defined(dRenderVariant_color) || defined(dRenderVariant_tracing)
             material = vec4(uBackgroundColor, uBackgroundOpacity * material.a);
         #endif
     } else {
-        // retrieve signed distance
-        float sdf = texture2D(tFont, vTexCoord).a + uBorderWidth;
-
-        if (sdf < 0.5) discard;
-
         #if defined(dRenderVariant_color) || defined(dRenderVariant_tracing)
-            // add border
-            float t = 0.5 + uBorderWidth;
-            if (uBorderWidth > 0.0 && sdf < t) {
+            if (uBorderWidth > 0.0 && rawSdf < 0.5) {
                 material.xyz = uBorderColor;
+            } else {
+                // push text fragments forward in depth so they render in front of border
+                #ifdef enabledFragDepth
+                    gl_FragDepthEXT = fragmentDepth - 0.0001;
+                #endif
             }
         #endif
     }
@@ -60259,15 +66294,14 @@ precision highp int;
 #include normal_frag_params
 #include common_clip
 
+uniform vec4 uInteriorColor;
+uniform vec4 uInteriorSubstance;
+
 void main() {
     #include fade_lod
     #include clip_pixel
 
-    #if defined(dFlipSided)
-        interior = gl_FrontFacing;
-    #else
-        interior = !gl_FrontFacing;
-    #endif
+    interior = !gl_FrontFacing;
 
     float fragmentDepth = gl_FragCoord.z;
 
@@ -60279,6 +66313,10 @@ void main() {
         #else
             vec3 normal = -normalize(vNormal);
             if (uDoubleSided) normal *= float(gl_FrontFacing) * 2.0 - 1.0;
+        #endif
+
+        #if defined(dFlipSided)
+            normal *= -1.0;
         #endif
     #endif
 
@@ -60302,8 +66340,8 @@ void main() {
     #elif defined(dRenderVariant_emissive)
         gl_FragColor = material;
     #elif defined(dRenderVariant_color) || defined(dRenderVariant_tracing)
-        #include apply_light_color
         #include apply_interior_color
+        #include apply_light_color
         #include apply_marker_color
 
         #if defined(dRenderVariant_color)
@@ -60767,6 +66805,7 @@ attribute float aInstance;
 
 varying vec2 vUv;
 varying float vInstance;
+varying vec3 vPosition;
 
 void main() {
     int vertexId = VertexID;
@@ -60775,6 +66814,7 @@ void main() {
 
     vUv = aUv;
     vInstance = aInstance;
+    vPosition = aPosition;
 }
 `;
     }
@@ -60839,6 +66879,7 @@ uniform sampler2D tMarker;
 
 varying vec2 vUv;
 varying float vInstance;
+varying vec3 vPosition;
 
 #ifdef dUsePalette
     uniform sampler2D tPalette;
@@ -60919,7 +66960,7 @@ uniform float uIsoLevel;
 #endif
 
 void main() {
-    if (uTrimType != 0 && getSignedDistance(vModelPosition, uTrimType, uTrimCenter, uTrimRotation, uTrimScale, uTrimTransform) > 0.0) discard;
+    if (uTrimType != 0 && getSignedDistance(vPosition, uTrimType, uTrimCenter, uTrimRotation, uTrimScale, uTrimTransform) > 0.0) discard;
 
     #include fade_lod
     #include clip_pixel
@@ -61237,7 +67278,7 @@ void main() {
       PointsShaderCode = ShaderCode("points", points_vert, points_frag, { drawBuffers: "optional" }, {}, ignoreDefineUnlit);
       SpheresShaderCode = ShaderCode("spheres", spheres_vert, spheres_frag, { fragDepth: "required", drawBuffers: "optional" }, {}, ignoreDefine);
       CylindersShaderCode = ShaderCode("cylinders", cylinders_vert, cylinders_frag, { fragDepth: "required", drawBuffers: "optional" }, {}, ignoreDefine);
-      TextShaderCode = ShaderCode("text", text_vert, text_frag, { drawBuffers: "optional" }, {}, ignoreDefineUnlit);
+      TextShaderCode = ShaderCode("text", text_vert, text_frag, { fragDepth: "optional", drawBuffers: "optional" }, {}, ignoreDefineUnlit);
       LinesShaderCode = ShaderCode("lines", lines_vert, lines_frag, { drawBuffers: "optional" }, {}, ignoreDefineUnlit);
       MeshShaderCode = ShaderCode("mesh", mesh_vert, mesh_frag, { drawBuffers: "optional" }, {}, ignoreDefine);
       DirectVolumeShaderCode = ShaderCode("direct-volume", directVolume_vert, directVolume_frag, { fragDepth: "optional", drawBuffers: "optional" }, {}, ignoreDefine);
@@ -62147,6 +68188,17 @@ void main() {
           return array2;
         }
         Material2.toArray = toArray2;
+        function toArrayNormalized(material, array2, offset2) {
+          array2[offset2] = material.metalness;
+          array2[offset2 + 1] = material.roughness;
+          array2[offset2 + 2] = material.bumpiness;
+          return array2;
+        }
+        Material2.toArrayNormalized = toArrayNormalized;
+        function areEqual4(a5, b5) {
+          return a5.metalness === b5.metalness && a5.roughness === b5.roughness && a5.bumpiness === b5.bumpiness;
+        }
+        Material2.areEqual = areEqual4;
         function toString8({ metalness, roughness, bumpiness }) {
           return `M ${metalness.toFixed(2)} | R ${roughness.toFixed(2)} | B ${bumpiness.toFixed(2)}`;
         }
@@ -62232,7 +68284,8 @@ void main() {
             type3[i] = Clip2.Type[p3.type];
             invert[i] = p3.invert;
             Vec3.toArray(p3.position, position, i * 3);
-            Quat.toArray(Quat.setAxisAngle(qA, p3.rotation.axis, degToRad(p3.rotation.angle)), rotation, i * 4);
+            Vec3.normalize(vA, p3.rotation.axis);
+            Quat.toArray(Quat.setAxisAngle(qA, vA, degToRad(p3.rotation.angle)), rotation, i * 4);
             Vec3.toArray(p3.scale, scale, i * 3);
             Mat4.toArray(p3.transform, transform, i * 16);
           }
@@ -62768,6 +68821,45 @@ void main() {
     }
   });
 
+  // node_modules/molstar/lib/mol-geo/geometry/interior.js
+  function getInteriorParam() {
+    return ParamDefinition.Group({
+      color: ParamDefinition.Color(Color.fromRgb(76, 76, 76)),
+      colorStrength: ParamDefinition.Numeric(1, { min: 0, max: 1, step: 0.01 }),
+      substance: Material.getParam(),
+      substanceStrength: ParamDefinition.Numeric(1, { min: 0, max: 1, step: 0.01 })
+    });
+  }
+  function getInteriorColor(props, out) {
+    Color.toArrayNormalized(props.color, out, 0);
+    out[3] = props.colorStrength;
+    return out;
+  }
+  function getInteriorSubstance(props, out) {
+    Material.toArrayNormalized(props.substance, out, 0);
+    out[3] = props.substanceStrength;
+    return out;
+  }
+  function createInteriorValues(props) {
+    return {
+      uInteriorColor: ValueCell.create(getInteriorColor(props, Vec4())),
+      uInteriorSubstance: ValueCell.create(getInteriorSubstance(props, Vec4()))
+    };
+  }
+  function updateInteriorValues(values2, props) {
+    ValueCell.update(values2.uInteriorColor, getInteriorColor(props, values2.uInteriorColor.ref.value));
+    ValueCell.update(values2.uInteriorSubstance, getInteriorSubstance(props, values2.uInteriorSubstance.ref.value));
+  }
+  var init_interior = __esm({
+    "node_modules/molstar/lib/mol-geo/geometry/interior.js"() {
+      init_vec4();
+      init_color();
+      init_material();
+      init_param_definition();
+      init_value_cell();
+    }
+  });
+
   // node_modules/molstar/lib/mol-geo/geometry/mesh/mesh.js
   var Mesh;
   var init_mesh = __esm({
@@ -62790,6 +68882,7 @@ void main() {
       init_misc();
       init_substance_data();
       init_emissive_data();
+      init_interior();
       (function(Mesh2) {
         function create3(vertices2, indices2, normals, groups, vertexCount, triangleCount, mesh) {
           return mesh ? update9(vertices2, indices2, normals, groups, vertexCount, triangleCount, mesh) : fromArrays(vertices2, indices2, normals, groups, vertexCount, triangleCount);
@@ -62846,6 +68939,9 @@ void main() {
             setBoundingSphere(sphere) {
               Sphere3D.copy(boundingSphere, sphere);
               currentHash = hashCode6(mesh);
+            },
+            hasBoundingSphere() {
+              return currentHash === hashCode6(mesh);
             },
             meta: {}
           };
@@ -63293,7 +69389,8 @@ void main() {
           xrayShaded: ParamDefinition.Select(false, [[false, "Off"], [true, "On"], ["inverted", "Inverted"]], BaseGeometry.ShadingCategory),
           transparentBackfaces: ParamDefinition.Select("off", ParamDefinition.arrayToOptions(["off", "on", "opaque"]), BaseGeometry.ShadingCategory),
           bumpFrequency: ParamDefinition.Numeric(0, { min: 0, max: 10, step: 0.1 }, BaseGeometry.ShadingCategory),
-          bumpAmplitude: ParamDefinition.Numeric(1, { min: 0, max: 5, step: 0.1 }, BaseGeometry.ShadingCategory)
+          bumpAmplitude: ParamDefinition.Numeric(1, { min: 0, max: 5, step: 0.1 }, BaseGeometry.ShadingCategory),
+          interior: getInteriorParam()
         };
         Mesh2.Utils = {
           Params: Mesh2.Params,
@@ -63368,7 +69465,8 @@ void main() {
             dTransparentBackfaces: ValueCell.create(props.transparentBackfaces),
             uBumpFrequency: ValueCell.create(props.bumpFrequency),
             uBumpAmplitude: ValueCell.create(props.bumpAmplitude),
-            meta: ValueCell.create(mesh.meta)
+            meta: ValueCell.create(mesh.meta),
+            ...createInteriorValues(props.interior)
           };
         }
         function createValuesSimple(mesh, props, colorValue, sizeValue, transform2) {
@@ -63387,6 +69485,7 @@ void main() {
           ValueCell.updateIfChanged(values2.dTransparentBackfaces, props.transparentBackfaces);
           ValueCell.updateIfChanged(values2.uBumpFrequency, props.bumpFrequency);
           ValueCell.updateIfChanged(values2.uBumpAmplitude, props.bumpAmplitude);
+          updateInteriorValues(values2, props.interior);
         }
         function updateBoundingSphere(values2, mesh) {
           const invariantBoundingSphere = Sphere3D.clone(mesh.boundingSphere);
@@ -64306,16 +70405,20 @@ void main() {
   });
 
   // node_modules/molstar/lib/mol-geo/geometry/size-data.js
-  function createSizes(locationIt, sizeTheme, sizeData) {
+  function createSizes(locationIt, positionIt, sizeTheme, sizeData) {
     switch (Geometry.getGranularity(locationIt, sizeTheme.granularity)) {
       case "uniform":
         return createUniformSize(locationIt, sizeTheme.size, sizeData);
+      case "instance":
+        return createInstanceSize(locationIt, sizeTheme.size, sizeData);
       case "group":
         return createGroupSize(locationIt, sizeTheme.size, sizeData);
       case "groupInstance":
         return createGroupInstanceSize(locationIt, sizeTheme.size, sizeData);
-      case "instance":
-        return createInstanceSize(locationIt, sizeTheme.size, sizeData);
+      case "vertex":
+        return createVertexSize(positionIt, sizeTheme.size, sizeData);
+      case "vertexInstance":
+        return createVertexInstanceSize(positionIt, sizeTheme.size, sizeData);
     }
   }
   function getMaxSize(sizeData) {
@@ -64326,6 +70429,8 @@ void main() {
       case "instance":
       case "group":
       case "groupInstance":
+      case "vertex":
+      case "vertexInstance":
         let maxSize = 0;
         const array2 = sizeData.tSize.ref.value.array;
         for (let i = 0, il = array2.length; i < il; i += 3) {
@@ -64406,6 +70511,27 @@ void main() {
       packIntToRGBArray(sizeFn(v2.location) * sizeDataFactor, sizes.array, v2.index * 3);
     }
     return createTextureSize(sizes, "groupInstance", sizeData);
+  }
+  function createVertexSize(locationIt, sizeFn, sizeData) {
+    const { groupCount } = locationIt;
+    const sizes = createTextureImage(Math.max(1, groupCount), 3, Uint8Array, sizeData && sizeData.tSize.ref.value.array);
+    locationIt.reset();
+    while (locationIt.hasNext) {
+      const v2 = locationIt.move();
+      packIntToRGBArray(sizeFn(v2.location) * sizeDataFactor, sizes.array, v2.index * 3);
+    }
+    return createTextureSize(sizes, "vertex", sizeData);
+  }
+  function createVertexInstanceSize(locationIt, sizeFn, sizeData) {
+    const { groupCount, instanceCount } = locationIt;
+    const count3 = instanceCount * groupCount;
+    const sizes = createTextureImage(Math.max(1, count3), 3, Uint8Array, sizeData && sizeData.tSize.ref.value.array);
+    locationIt.reset();
+    while (locationIt.hasNext) {
+      const v2 = locationIt.move();
+      packIntToRGBArray(sizeFn(v2.location) * sizeDataFactor, sizes.array, v2.index * 3);
+    }
+    return createTextureSize(sizes, "vertexInstance", sizeData);
   }
   var sizeDataFactor, emptySizeTexture;
   var init_size_data = __esm({
@@ -64489,6 +70615,9 @@ void main() {
             setBoundingSphere(sphere) {
               Sphere3D.copy(boundingSphere, sphere);
               currentHash = hashCode6(points2);
+            },
+            hasBoundingSphere() {
+              return currentHash === hashCode6(points2);
             }
           };
           return points2;
@@ -64549,7 +70678,7 @@ void main() {
           const { instanceCount, groupCount } = locationIt;
           const positionIt = createPositionIterator(points2, transform2);
           const color = createColors(locationIt, positionIt, theme.color);
-          const size4 = createSizes(locationIt, theme.size);
+          const size4 = createSizes(locationIt, positionIt, theme.size);
           const marker = props.instanceGranularity ? createMarkers(instanceCount, "instance") : createMarkers(instanceCount * groupCount, "groupInstance");
           const overpaint = createEmptyOverpaint();
           const transparency = createEmptyTransparency();
@@ -64713,7 +70842,7 @@ void main() {
           this.cutoff = 0.5;
           const p3 = { ...ParamDefinition.getDefaultValues(FontAtlasParams), ...props };
           this.props = p3;
-          const fontSize = 32 * (p3.fontQuality + 1);
+          const fontSize = 64 * (p3.fontQuality + 1);
           this.buffer = fontSize / 8;
           this.radius = fontSize / 3;
           this.lineHeight = Math.round(fontSize + 2 * this.buffer + this.radius);
@@ -64793,21 +70922,22 @@ void main() {
 
   // node_modules/molstar/lib/mol-geo/geometry/text/text.js
   function getPadding(mappings, depths, charCount, scale) {
-    let maxOffset = 0;
+    let maxOffsetX = 0;
+    let maxOffsetY = 0;
     let maxDepth = 0;
     for (let i = 0, il = charCount * 4; i < il; ++i) {
       const i2 = 2 * i;
       const ox = Math.abs(mappings[i2]);
-      if (ox > maxOffset)
-        maxOffset = ox;
+      if (ox > maxOffsetX)
+        maxOffsetX = ox;
       const oy = Math.abs(mappings[i2 + 1]);
-      if (oy > maxOffset)
-        maxOffset = oy;
+      if (oy > maxOffsetY)
+        maxOffsetY = oy;
       const d3 = Math.abs(depths[i]);
       if (d3 > maxDepth)
         maxDepth = d3;
     }
-    return Math.max(maxDepth, scale * maxOffset);
+    return Math.max(maxDepth, scale * Math.sqrt(maxOffsetX * maxOffsetX + maxOffsetY * maxOffsetY));
   }
   var Text;
   var init_text2 = __esm({
@@ -64895,6 +71025,9 @@ void main() {
             setBoundingSphere(sphere) {
               Sphere3D.copy(boundingSphere, sphere);
               currentHash = hashCode6(text);
+            },
+            hasBoundingSphere() {
+              return currentHash === hashCode6(text);
             }
           };
           return text;
@@ -64970,7 +71103,7 @@ void main() {
           const { instanceCount, groupCount } = locationIt;
           const positionIt = createPositionIterator(text, transform);
           const color = createColors(locationIt, positionIt, theme.color);
-          const size4 = createSizes(locationIt, theme.size);
+          const size4 = createSizes(locationIt, positionIt, theme.size);
           const marker = props.instanceGranularity ? createMarkers(instanceCount, "instance") : createMarkers(instanceCount * groupCount, "groupInstance");
           const overpaint = createEmptyOverpaint();
           const transparency = createEmptyTransparency();
@@ -65090,17 +71223,18 @@ void main() {
       ib[io + 5] = o + 2;
     }
   }
-  var tmpVecA2, tmpVecB2, tmpDir, caAdd2, caAdd32, LinesBuilder;
+  var caAdd2, caAdd22, caAdd32, tmpVecA2, tmpVecB2, tmpDir, LinesBuilder, StripLinesBuilder;
   var init_lines_builder = __esm({
     "node_modules/molstar/lib/mol-geo/geometry/lines/lines-builder.js"() {
       init_util2();
       init_lines();
       init_linear_algebra();
+      caAdd2 = ChunkedArray.add;
+      caAdd22 = ChunkedArray.add2;
+      caAdd32 = ChunkedArray.add3;
       tmpVecA2 = Vec3();
       tmpVecB2 = Vec3();
       tmpDir = Vec3();
-      caAdd2 = ChunkedArray.add;
-      caAdd32 = ChunkedArray.add3;
       (function(LinesBuilder2) {
         function create3(initialCount = 2048, chunkSize = 1024, lines) {
           const groups = ChunkedArray.create(Float32Array, 1, chunkSize, lines ? lines.groupBuffer.ref.value : initialCount);
@@ -65158,19 +71292,104 @@ void main() {
             },
             getLines: () => {
               const lineCount = groups.elementCount / 4;
+              const vertexCount = groups.elementCount;
               const gb = ChunkedArray.compact(groups, true);
               const sb = ChunkedArray.compact(starts, true);
               const eb = ChunkedArray.compact(ends, true);
-              const mb = lines && lineCount <= lines.lineCount ? lines.mappingBuffer.ref.value : new Float32Array(lineCount * 8);
-              const ib = lines && lineCount <= lines.lineCount ? lines.indexBuffer.ref.value : new Uint32Array(lineCount * 6);
-              if (!lines || lineCount > lines.lineCount)
+              const mb = lines && lineCount <= lines.lineCount && lines.stripCount.ref.value === 0 ? lines.mappingBuffer.ref.value : new Float32Array(lineCount * 8);
+              const ib = lines && lineCount <= lines.lineCount && lines.stripCount.ref.value === 0 ? lines.indexBuffer.ref.value : new Uint32Array(lineCount * 6);
+              const ob = lines ? lines.stripBuffer.ref.value : new Uint32Array(0);
+              if (!lines || lineCount > lines.lineCount || lines.stripCount.ref.value > 0)
                 fillMappingAndIndices(lineCount, mb, ib);
-              return Lines.create(mb, ib, gb, sb, eb, lineCount, lines);
+              return Lines.create(mb, ib, gb, sb, eb, ob, lineCount, vertexCount, 0, lines);
             }
           };
         }
         LinesBuilder2.create = create3;
       })(LinesBuilder || (LinesBuilder = {}));
+      (function(StripLinesBuilder2) {
+        function create3(initialCount = 2048, chunkSize = 1024, lines) {
+          const groups = ChunkedArray.create(Float32Array, 1, chunkSize, lines ? lines.groupBuffer.ref.value : initialCount);
+          const starts = ChunkedArray.create(Float32Array, 3, chunkSize, lines ? lines.startBuffer.ref.value : initialCount);
+          const ends = ChunkedArray.create(Float32Array, 3, chunkSize, lines ? lines.endBuffer.ref.value : initialCount);
+          const mapping = ChunkedArray.create(Float32Array, 2, chunkSize, lines ? lines.mappingBuffer.ref.value : initialCount);
+          const indices2 = ChunkedArray.create(Uint32Array, 3, chunkSize, lines ? lines.indexBuffer.ref.value : initialCount);
+          const strips = ChunkedArray.create(Uint32Array, 1, chunkSize, lines ? lines.stripBuffer.ref.value : initialCount);
+          let stripGroup = 0;
+          let pointCount = 0;
+          let firstVertexOffset = 0;
+          let prevX = 0, prevY = 0, prevZ = 0;
+          const addPoint = (x, y, z) => {
+            if (pointCount === 0) {
+              firstVertexOffset = groups.elementCount;
+              prevX = x;
+              prevY = y;
+              prevZ = z;
+              pointCount = 1;
+              return;
+            }
+            const vertexOffset = groups.elementCount;
+            if (pointCount === 1) {
+              caAdd32(starts, prevX, prevY, prevZ);
+              caAdd32(ends, x, y, z);
+              caAdd2(groups, stripGroup);
+              caAdd22(mapping, -1, -1);
+              caAdd32(starts, prevX, prevY, prevZ);
+              caAdd32(ends, x, y, z);
+              caAdd2(groups, stripGroup);
+              caAdd22(mapping, 1, -1);
+            }
+            caAdd32(starts, prevX, prevY, prevZ);
+            caAdd32(ends, x, y, z);
+            caAdd2(groups, stripGroup);
+            caAdd22(mapping, -1, 1);
+            caAdd32(starts, prevX, prevY, prevZ);
+            caAdd32(ends, x, y, z);
+            caAdd2(groups, stripGroup);
+            caAdd22(mapping, 1, 1);
+            const prevOffset = pointCount === 1 ? firstVertexOffset : vertexOffset - 2;
+            const currOffset = pointCount === 1 ? vertexOffset + 2 : vertexOffset;
+            caAdd32(indices2, prevOffset, prevOffset + 1, currOffset);
+            caAdd32(indices2, prevOffset + 1, currOffset + 1, currOffset);
+            prevX = x;
+            prevY = y;
+            prevZ = z;
+            pointCount++;
+          };
+          return {
+            start: (group) => {
+              stripGroup = group;
+              pointCount = 0;
+              if (strips.elementCount === 0) {
+                caAdd2(strips, 0);
+              }
+            },
+            add: (x, y, z) => {
+              addPoint(x, y, z);
+            },
+            addVec: (v2) => {
+              addPoint(v2[0], v2[1], v2[2]);
+            },
+            end: () => {
+              pointCount = 0;
+              caAdd2(strips, groups.elementCount);
+            },
+            getLines: () => {
+              const lineCount = indices2.elementCount / 2;
+              const vertexCount = groups.elementCount;
+              const stripCount = strips.elementCount - 1;
+              const gb = ChunkedArray.compact(groups, true);
+              const sb = ChunkedArray.compact(starts, true);
+              const eb = ChunkedArray.compact(ends, true);
+              const mb = ChunkedArray.compact(mapping, true);
+              const ib = ChunkedArray.compact(indices2, true);
+              const ob = ChunkedArray.compact(strips, true);
+              return Lines.create(mb, ib, gb, sb, eb, ob, lineCount, vertexCount, stripCount, lines);
+            }
+          };
+        }
+        StripLinesBuilder2.create = create3;
+      })(StripLinesBuilder || (StripLinesBuilder = {}));
     }
   });
 
@@ -65197,8 +71416,8 @@ void main() {
       init_substance_data();
       init_emissive_data();
       (function(Lines2) {
-        function create3(mappings, indices2, groups, starts, ends, lineCount, lines) {
-          return lines ? update9(mappings, indices2, groups, starts, ends, lineCount, lines) : fromArrays(mappings, indices2, groups, starts, ends, lineCount);
+        function create3(mappings, indices2, groups, starts, ends, strips, lineCount, vertexCount, stripCount, lines) {
+          return lines ? update9(mappings, indices2, groups, starts, ends, strips, lineCount, vertexCount, stripCount, lines) : fromArrays(mappings, indices2, groups, starts, ends, strips, lineCount, vertexCount, stripCount);
         }
         Lines2.create = create3;
         function createEmpty(lines) {
@@ -65207,7 +71426,8 @@ void main() {
           const gb = lines ? lines.groupBuffer.ref.value : new Float32Array(0);
           const sb = lines ? lines.startBuffer.ref.value : new Float32Array(0);
           const eb = lines ? lines.endBuffer.ref.value : new Float32Array(0);
-          return create3(mb, ib, gb, sb, eb, 0, lines);
+          const ob = lines ? lines.stripBuffer.ref.value : new Uint32Array(0);
+          return create3(mb, ib, gb, sb, eb, ob, 0, 0, 0, lines);
         }
         Lines2.createEmpty = createEmpty;
         function fromMesh(mesh, lines) {
@@ -65230,14 +71450,17 @@ void main() {
         function hashCode6(lines) {
           return hashFnv32a([
             lines.lineCount,
+            lines.vertexCount,
             lines.mappingBuffer.ref.version,
             lines.indexBuffer.ref.version,
             lines.groupBuffer.ref.version,
             lines.startBuffer.ref.version,
-            lines.endBuffer.ref.version
+            lines.endBuffer.ref.version,
+            lines.stripCount.ref.version,
+            lines.stripBuffer.ref.version
           ]);
         }
-        function fromArrays(mappings, indices2, groups, starts, ends, lineCount) {
+        function fromArrays(mappings, indices2, groups, starts, ends, strips, lineCount, vertexCount, stripCount) {
           const boundingSphere = Sphere3D();
           let groupMapping;
           let currentHash = -1;
@@ -65245,11 +71468,14 @@ void main() {
           const lines = {
             kind: "lines",
             lineCount,
+            vertexCount,
             mappingBuffer: ValueCell.create(mappings),
             indexBuffer: ValueCell.create(indices2),
             groupBuffer: ValueCell.create(groups),
             startBuffer: ValueCell.create(starts),
             endBuffer: ValueCell.create(ends),
+            stripCount: ValueCell.create(stripCount),
+            stripBuffer: ValueCell.create(strips),
             get boundingSphere() {
               const newHash = hashCode6(lines);
               if (newHash !== currentHash) {
@@ -65270,27 +71496,33 @@ void main() {
             setBoundingSphere(sphere) {
               Sphere3D.copy(boundingSphere, sphere);
               currentHash = hashCode6(lines);
+            },
+            hasBoundingSphere() {
+              return currentHash === hashCode6(lines);
             }
           };
           return lines;
         }
-        function update9(mappings, indices2, groups, starts, ends, lineCount, lines) {
-          if (lineCount > lines.lineCount) {
+        function update9(mappings, indices2, groups, starts, ends, strips, lineCount, vertexCount, stripCount, lines) {
+          if (lineCount > lines.lineCount || stripCount !== lines.stripCount.ref.value || stripCount > 0) {
             ValueCell.update(lines.mappingBuffer, mappings);
             ValueCell.update(lines.indexBuffer, indices2);
           }
           lines.lineCount = lineCount;
+          lines.vertexCount = vertexCount;
           ValueCell.update(lines.groupBuffer, groups);
           ValueCell.update(lines.startBuffer, starts);
           ValueCell.update(lines.endBuffer, ends);
+          ValueCell.updateIfChanged(lines.stripCount, stripCount);
+          ValueCell.update(lines.stripBuffer, strips);
           return lines;
         }
         function transform(lines, t2) {
           const start4 = lines.startBuffer.ref.value;
-          transformPositionArray(t2, start4, 0, lines.lineCount * 4);
+          transformPositionArray(t2, start4, 0, lines.vertexCount);
           ValueCell.update(lines.startBuffer, start4);
           const end4 = lines.endBuffer.ref.value;
-          transformPositionArray(t2, end4, 0, lines.lineCount * 4);
+          transformPositionArray(t2, end4, 0, lines.vertexCount);
           ValueCell.update(lines.endBuffer, end4);
         }
         Lines2.transform = transform;
@@ -65333,14 +71565,14 @@ void main() {
           const { instanceCount, groupCount } = locationIt;
           const positionIt = createPositionIterator(lines, transform2);
           const color = createColors(locationIt, positionIt, theme.color);
-          const size4 = createSizes(locationIt, theme.size);
+          const size4 = createSizes(locationIt, positionIt, theme.size);
           const marker = props.instanceGranularity ? createMarkers(instanceCount, "instance") : createMarkers(instanceCount * groupCount, "groupInstance");
           const overpaint = createEmptyOverpaint();
           const transparency = createEmptyTransparency();
           const emissive = createEmptyEmissive();
           const material = createEmptySubstance();
           const clipping = createEmptyClipping();
-          const counts = { drawCount: lines.lineCount * 2 * 3, vertexCount: lines.lineCount * 4, groupCount, instanceCount };
+          const counts = { drawCount: lines.lineCount * 2 * 3, vertexCount: lines.vertexCount, groupCount, instanceCount };
           const invariantBoundingSphere = Sphere3D.clone(lines.boundingSphere);
           const boundingSphere = calculateTransformBoundingSphere(invariantBoundingSphere, transform2.aTransform.ref.value, instanceCount, 0);
           return {
@@ -65366,7 +71598,9 @@ void main() {
             uSizeFactor: ValueCell.create(props.sizeFactor),
             dLineSizeAttenuation: ValueCell.create(props.lineSizeAttenuation),
             uDoubleSided: ValueCell.create(true),
-            dFlipSided: ValueCell.create(false)
+            dFlipSided: ValueCell.create(false),
+            stripCount: lines.stripCount,
+            stripOffsets: lines.stripBuffer
           };
         }
         function createValuesSimple(lines, props, colorValue, sizeValue, transform2) {
@@ -65590,13 +71824,15 @@ void main() {
   });
 
   // node_modules/molstar/lib/mol-model/volume/grid.js
-  var Grid;
+  var v3transformMat43, v3lerp, Grid;
   var init_grid2 = __esm({
     "node_modules/molstar/lib/mol-model/volume/grid.js"() {
       init_geometry();
       init_linear_algebra();
       init_histogram();
       init_interpolate();
+      v3transformMat43 = Vec3.transformMat4;
+      v3lerp = Vec3.lerp;
       (function(Grid2) {
         Grid2.One = {
           transform: { kind: "matrix", matrix: Mat4.identity() },
@@ -65652,32 +71888,13 @@ void main() {
           const { dimensions, get: get11 } = grid.cells.space;
           const data = grid.cells.data;
           const [mi, mj, mk] = dimensions;
+          const getValue = (i, j, k) => get11(data, i, j, k);
+          const isPeriodic = grid.periodicity === "xyz";
           return function getTrilinearlyInterpolated2(position) {
-            Vec3.copy(gridCoords, position);
-            Vec3.transformMat4(gridCoords, gridCoords, cartnToGrid);
-            const i = Math.trunc(gridCoords[0]);
-            const j = Math.trunc(gridCoords[1]);
-            const k = Math.trunc(gridCoords[2]);
-            if (i < 0 || i >= mi || j < 0 || j >= mj || k < 0 || k >= mk) {
-              return Number.NaN;
-            }
-            const u = gridCoords[0] - i;
-            const v2 = gridCoords[1] - j;
-            const w = gridCoords[2] - k;
-            const ii = Math.min(i + 1, mi - 1);
-            const jj = Math.min(j + 1, mj - 1);
-            const kk = Math.min(k + 1, mk - 1);
-            let a5 = get11(data, i, j, k);
-            let b5 = get11(data, ii, j, k);
-            let c5 = get11(data, i, jj, k);
-            let d3 = get11(data, ii, jj, k);
-            const x = lerp(lerp(a5, b5, u), lerp(c5, d3, u), v2);
-            a5 = get11(data, i, j, kk);
-            b5 = get11(data, ii, j, kk);
-            c5 = get11(data, i, jj, kk);
-            d3 = get11(data, ii, jj, kk);
-            const y = lerp(lerp(a5, b5, u), lerp(c5, d3, u), v2);
-            const value = lerp(x, y, w);
+            v3transformMat43(gridCoords, position, cartnToGrid);
+            const value = trilinearlyInterpolate(gridCoords, mi, mj, mk, isPeriodic, getValue);
+            if (Number.isNaN(value))
+              return value;
             if (transform === "relative") {
               return (value - stats.mean) / stats.sigma;
             } else {
@@ -65686,6 +71903,135 @@ void main() {
           };
         }
         Grid2.makeGetTrilinearlyInterpolated = makeGetTrilinearlyInterpolated;
+        function trilinearlyInterpolate(gridCoords, mi, mj, mk, isPeriodic, getValue) {
+          const i = Math.trunc(gridCoords[0]);
+          const j = Math.trunc(gridCoords[1]);
+          const k = Math.trunc(gridCoords[2]);
+          if (!isPeriodic && (i < 0 || i >= mi || j < 0 || j >= mj || k < 0 || k >= mk)) {
+            return Number.NaN;
+          }
+          const u = gridCoords[0] - i;
+          const v2 = gridCoords[1] - j;
+          const w = gridCoords[2] - k;
+          const ii = Math.min(i + 1, mi - 1);
+          const jj = Math.min(j + 1, mj - 1);
+          const kk = Math.min(k + 1, mk - 1);
+          let a5 = getValue(i, j, k);
+          let b5 = getValue(ii, j, k);
+          let c5 = getValue(i, jj, k);
+          let d3 = getValue(ii, jj, k);
+          const x = lerp(lerp(a5, b5, u), lerp(c5, d3, u), v2);
+          a5 = getValue(i, j, kk);
+          b5 = getValue(ii, j, kk);
+          c5 = getValue(i, jj, kk);
+          d3 = getValue(ii, jj, kk);
+          const y = lerp(lerp(a5, b5, u), lerp(c5, d3, u), v2);
+          return lerp(x, y, w);
+        }
+        Grid2.trilinearlyInterpolate = trilinearlyInterpolate;
+        const _a = Vec3(), _b = Vec3(), _c = Vec3(), _d = Vec3();
+        const _ab = Vec3(), _cd = Vec3(), _x = Vec3(), _y = Vec3();
+        function trilinearlyInterpolateVec3(gridCoords, mi, mj, mk, getValue, out) {
+          const i = Math.trunc(gridCoords[0]);
+          const j = Math.trunc(gridCoords[1]);
+          const k = Math.trunc(gridCoords[2]);
+          if (i < 0 || i >= mi || j < 0 || j >= mj || k < 0 || k >= mk) {
+            return false;
+          }
+          const u = gridCoords[0] - i;
+          const v2 = gridCoords[1] - j;
+          const w = gridCoords[2] - k;
+          const ii = Math.min(i + 1, mi - 1);
+          const jj = Math.min(j + 1, mj - 1);
+          const kk = Math.min(k + 1, mk - 1);
+          getValue(i, j, k, _a);
+          getValue(ii, j, k, _b);
+          getValue(i, jj, k, _c);
+          getValue(ii, jj, k, _d);
+          v3lerp(_ab, _a, _b, u);
+          v3lerp(_cd, _c, _d, u);
+          v3lerp(_x, _ab, _cd, v2);
+          getValue(i, j, kk, _a);
+          getValue(ii, j, kk, _b);
+          getValue(i, jj, kk, _c);
+          getValue(ii, jj, kk, _d);
+          v3lerp(_ab, _a, _b, u);
+          v3lerp(_cd, _c, _d, u);
+          v3lerp(_y, _ab, _cd, v2);
+          v3lerp(out, _x, _y, w);
+          return true;
+        }
+        Grid2.trilinearlyInterpolateVec3 = trilinearlyInterpolateVec3;
+        function getGradients(grid) {
+          if (grid._gradients) {
+            return grid._gradients;
+          }
+          const gradients = computeGradients(grid);
+          grid._gradients = gradients;
+          return gradients;
+        }
+        Grid2.getGradients = getGradients;
+        function computeGradients(grid) {
+          const { dimensions, get: get11, dataOffset } = grid.cells.space;
+          const data = grid.cells.data;
+          const [mi, mj, mk] = dimensions;
+          const n = mi * mj * mk;
+          const values2 = new Float32Array(n * 3);
+          let min5 = Infinity;
+          let max5 = -Infinity;
+          let sum = 0;
+          let sumSq = 0;
+          for (let k = 0; k < mk; ++k) {
+            for (let j = 0; j < mj; ++j) {
+              for (let i = 0; i < mi; ++i) {
+                const idx = dataOffset(i, j, k) * 3;
+                const im = Math.max(0, i - 1);
+                const ip = Math.min(mi - 1, i + 1);
+                const jm = Math.max(0, j - 1);
+                const jp = Math.min(mj - 1, j + 1);
+                const km = Math.max(0, k - 1);
+                const kp = Math.min(mk - 1, k + 1);
+                const gx = (get11(data, ip, j, k) - get11(data, im, j, k)) / (ip - im || 1);
+                const gy = (get11(data, i, jp, k) - get11(data, i, jm, k)) / (jp - jm || 1);
+                const gz = (get11(data, i, j, kp) - get11(data, i, j, km)) / (kp - km || 1);
+                values2[idx] = gx;
+                values2[idx + 1] = gy;
+                values2[idx + 2] = gz;
+                const mag = gx * gx + gy * gy + gz * gz;
+                if (mag < min5)
+                  min5 = mag;
+                if (mag > max5)
+                  max5 = mag;
+                sum += mag;
+                sumSq += mag * mag;
+              }
+            }
+          }
+          if (min5 === Infinity)
+            min5 = 0;
+          if (max5 === -Infinity)
+            max5 = 1;
+          min5 = Math.sqrt(min5);
+          max5 = Math.sqrt(max5);
+          const mean = sum / n;
+          const sigma = Math.sqrt(sumSq / n);
+          return { values: values2, magnitude: { min: min5, max: max5, mean, sigma } };
+        }
+        function makeGetInterpolatedGradient(grid) {
+          const { values: g } = getGradients(grid);
+          const { dimensions, dataOffset } = grid.cells.space;
+          const [mi, mj, mk] = dimensions;
+          const getGradientVec3 = (i, j, k, out) => {
+            const idx = dataOffset(i, j, k) * 3;
+            out[0] = g[idx];
+            out[1] = g[idx + 1];
+            out[2] = g[idx + 2];
+          };
+          return function getInterpolatedGradient(gridCoords, out) {
+            return trilinearlyInterpolateVec3(gridCoords, mi, mj, mk, getGradientVec3, out);
+          };
+        }
+        Grid2.makeGetInterpolatedGradient = makeGetInterpolatedGradient;
       })(Grid || (Grid = {}));
     }
   });
@@ -65732,7 +72078,8 @@ void main() {
         instances: [{ transform: Mat4.identity() }],
         sourceData: CubeFormat.create(source),
         customProperties: new CustomProperties(),
-        _propertyData: /* @__PURE__ */ Object.create(null)
+        _propertyData: /* @__PURE__ */ Object.create(null),
+        _localPropertyData: /* @__PURE__ */ Object.create(null)
       };
     });
   }
@@ -65771,7 +72118,6 @@ void main() {
       return {
         label: params === null || params === void 0 ? void 0 : params.label,
         entryId: params === null || params === void 0 ? void 0 : params.entryId,
-        periodicity: Vec3.isInteger(dimensions) ? "xyz" : "none",
         grid: {
           transform: { kind: "spacegroup", cell, fractionalBox: Box3D.create(origin, Vec3.add(Vec3.zero(), origin, dimensions)) },
           cells: data,
@@ -65780,12 +72126,14 @@ void main() {
             max: info.max_sampled.value(0),
             mean: info.mean_sampled.value(0),
             sigma: info.sigma_sampled.value(0)
-          }
+          },
+          periodicity: Vec3.isInteger(dimensions) ? "xyz" : "none"
         },
         instances: [{ transform: Mat4.identity() }],
         sourceData: DscifFormat.create(source),
         customProperties: new CustomProperties(),
-        _propertyData: /* @__PURE__ */ Object.create(null)
+        _propertyData: /* @__PURE__ */ Object.create(null),
+        _localPropertyData: /* @__PURE__ */ Object.create(null)
       };
     });
   }
@@ -65824,10 +72172,11 @@ void main() {
       init_param_definition();
       init_number();
       init_density_server2();
+      init_hash_functions();
       (function(Volume2) {
         function is4(x) {
           var _a, _b, _c, _d;
-          return ((_d = (_c = (_b = (_a = x === null || x === void 0 ? void 0 : x.grid) === null || _a === void 0 ? void 0 : _a.cells) === null || _b === void 0 ? void 0 : _b.space) === null || _c === void 0 ? void 0 : _c.dimensions) === null || _d === void 0 ? void 0 : _d.length) && (x === null || x === void 0 ? void 0 : x.sourceData) && (x === null || x === void 0 ? void 0 : x.customProperties) && (x === null || x === void 0 ? void 0 : x._propertyData);
+          return ((_d = (_c = (_b = (_a = x === null || x === void 0 ? void 0 : x.grid) === null || _a === void 0 ? void 0 : _a.cells) === null || _b === void 0 ? void 0 : _b.space) === null || _c === void 0 ? void 0 : _c.dimensions) === null || _d === void 0 ? void 0 : _d.length) && (x === null || x === void 0 ? void 0 : x.instances) && (x === null || x === void 0 ? void 0 : x.sourceData) && (x === null || x === void 0 ? void 0 : x.customProperties) && (x === null || x === void 0 ? void 0 : x._propertyData) && (x === null || x === void 0 ? void 0 : x._localPropertyData);
         }
         Volume2.is = is4;
         let IsoValue;
@@ -65912,7 +72261,8 @@ void main() {
           instances: [],
           sourceData: { kind: "", name: "", data: {} },
           customProperties: new CustomProperties(),
-          _propertyData: /* @__PURE__ */ Object.create(null)
+          _propertyData: /* @__PURE__ */ Object.create(null),
+          _localPropertyData: /* @__PURE__ */ Object.create(null)
         };
         function areEquivalent(volA, volB) {
           return Grid.areEquivalent(volA.grid, volB.grid) && areInstanceTransformsEqual(volA, volB);
@@ -65954,8 +72304,27 @@ void main() {
           return isEmpty3(loci.volume) || OrderedSet.isEmpty(loci.instances);
         }
         Volume2.isLociEmpty = isLociEmpty;
+        const boundaryHelper = new BoundaryHelper("98");
         function getBoundingSphere3(volume, boundingSphere) {
-          return Grid.getBoundingSphere(volume.grid, boundingSphere);
+          const gs = Grid.getBoundingSphere(volume.grid);
+          if (!boundingSphere)
+            boundingSphere = Sphere3D();
+          if (volume.instances.length === 0)
+            return Sphere3D.copy(boundingSphere, gs);
+          const spheres2 = [];
+          for (let i = 0, il = volume.instances.length; i < il; ++i) {
+            const { transform } = volume.instances[i];
+            spheres2.push(Sphere3D.transform(Sphere3D(), gs, transform));
+          }
+          boundaryHelper.reset();
+          for (const s of spheres2) {
+            boundaryHelper.includeSphere(s);
+          }
+          boundaryHelper.finishedIncludeStep();
+          for (const s of spheres2) {
+            boundaryHelper.radiusSphere(s);
+          }
+          return boundaryHelper.getSphere(boundingSphere);
         }
         Volume2.getBoundingSphere = getBoundingSphere3;
         let Isosurface;
@@ -66062,11 +72431,11 @@ void main() {
             return !!x && x.kind === "cell-location";
           }
           Cell3.isLocation = isLocation;
-          const boundaryHelper = new BoundaryHelper("98");
+          const boundaryHelper2 = new BoundaryHelper("98");
           const tmpBoundaryPos = Vec3();
           const tmpBoundaryPos2 = Vec3();
           function getBoundingSphere4(volume, elements, boundingSphere) {
-            boundaryHelper.reset();
+            boundaryHelper2.reset();
             const transform = Grid.getGridToCartesianTransform(volume.grid);
             const { getCoords } = volume.grid.cells.space;
             for (const { indices: indices2, instances } of elements) {
@@ -66077,11 +72446,11 @@ void main() {
                 for (let j = 0, _j = OrderedSet.size(instances); j < _j; j++) {
                   const instance = volume.instances[OrderedSet.getAt(instances, j)];
                   Vec3.transformMat4(tmpBoundaryPos2, tmpBoundaryPos, instance.transform);
-                  boundaryHelper.includePosition(tmpBoundaryPos2);
+                  boundaryHelper2.includePosition(tmpBoundaryPos2);
                 }
               }
             }
-            boundaryHelper.finishedIncludeStep();
+            boundaryHelper2.finishedIncludeStep();
             for (const { indices: indices2, instances } of elements) {
               for (let i = 0, _i = OrderedSet.size(indices2); i < _i; i++) {
                 const o = OrderedSet.getAt(indices2, i);
@@ -66090,11 +72459,11 @@ void main() {
                 for (let j = 0, _j = OrderedSet.size(instances); j < _j; j++) {
                   const instance = volume.instances[OrderedSet.getAt(instances, j)];
                   Vec3.transformMat4(tmpBoundaryPos2, tmpBoundaryPos, instance.transform);
-                  boundaryHelper.radiusPosition(tmpBoundaryPos2);
+                  boundaryHelper2.radiusPosition(tmpBoundaryPos2);
                 }
               }
             }
-            const bs = boundaryHelper.getSphere(boundingSphere);
+            const bs = boundaryHelper2.getSphere(boundingSphere);
             return Sphere3D.expand(bs, bs, Mat4.getMaxScaleOnAxis(transform) * 10);
           }
           Cell3.getBoundingSphere = getBoundingSphere4;
@@ -66197,6 +72566,74 @@ void main() {
             return volume._propertyData["__segmentation__"];
           }
         };
+        function getPeriodicRange(volume) {
+          if (!isPeriodic(volume))
+            return;
+          const v2 = volume.parent || volume;
+          if (!v2._localPropertyData["__periodicRange__"]) {
+            const dim = Vec3.fromArray(Vec3(), v2.grid.cells.space.dimensions, 0);
+            const gridToCartn = Grid.getGridToCartesianTransform(v2.grid);
+            Vec3.transformMat4(dim, dim, gridToCartn);
+            const min5 = Vec3.create(Infinity, Infinity, Infinity);
+            const max5 = Vec3.create(-Infinity, -Infinity, -Infinity);
+            const tg = Vec3();
+            for (const { transform } of v2.instances) {
+              Mat4.getTranslation(tg, transform);
+              Vec3.div(tg, tg, dim);
+              Vec3.round(tg, tg);
+              Vec3.min(min5, min5, tg);
+              Vec3.max(max5, max5, tg);
+            }
+            Vec3.addScalar(max5, max5, 1);
+            v2._localPropertyData["__periodicRange__"] = { min: min5, max: max5 };
+          }
+          return v2._localPropertyData["__periodicRange__"];
+        }
+        Volume2.getPeriodicRange = getPeriodicRange;
+        ;
+        function getPeriodicMapping(volume) {
+          if (!isPeriodic(volume))
+            return;
+          const v2 = volume.parent || volume;
+          if (!v2._localPropertyData["__periodicInstanceMapping__"]) {
+            const map3 = /* @__PURE__ */ new Map();
+            const dim = Vec3.fromArray(Vec3(), v2.grid.cells.space.dimensions, 0);
+            const gridToCartn = Grid.getGridToCartesianTransform(v2.grid);
+            Vec3.transformMat4(dim, dim, gridToCartn);
+            const { min: min5 } = getPeriodicRange(v2);
+            const tg = Vec3();
+            for (let i = 0, il = v2.instances.length; i < il; i++) {
+              const { transform } = v2.instances[i];
+              Mat4.getTranslation(tg, transform);
+              Vec3.div(tg, tg, dim);
+              Vec3.round(tg, tg);
+              Vec3.sub(tg, tg, min5);
+              map3.set(mortonOrder3d(tg[0], tg[1], tg[2]), i);
+            }
+            const dd = Vec3.fromArray(Vec3(), v2.grid.cells.space.dimensions, 0);
+            v2._localPropertyData["__periodicInstanceMapping__"] = {
+              get(x, y, z) {
+                Vec3.set(tg, x, y, z);
+                Vec3.div(tg, tg, dd);
+                Vec3.floor(tg, tg);
+                const instance = map3.get(mortonOrder3d(tg[0], tg[1], tg[2]));
+                if (instance === void 0)
+                  return;
+                Vec3.set(tg, x, y, z);
+                Vec3.mod(tg, tg, dd);
+                const cell = v2.grid.cells.space.dataOffset(tg[0], tg[1], tg[2]);
+                return { instance, cell };
+              }
+            };
+          }
+          return v2._localPropertyData["__periodicInstanceMapping__"];
+        }
+        Volume2.getPeriodicMapping = getPeriodicMapping;
+        ;
+        function isPeriodic(volume) {
+          return volume.grid.periodicity === "xyz";
+        }
+        Volume2.isPeriodic = isPeriodic;
       })(Volume || (Volume = {}));
     }
   });
@@ -66284,6 +72721,9 @@ void main() {
             setBoundingSphere(sphere) {
               Sphere3D.copy(boundingSphere, sphere);
               currentHash = hashCode6(directVolume);
+            },
+            hasBoundingSphere() {
+              return currentHash === hashCode6(directVolume);
             },
             meta: {}
           };
@@ -66505,6 +72945,7 @@ void main() {
       init_linear_algebra();
       init_substance_data();
       init_emissive_data();
+      init_interior();
       (function(Spheres2) {
         function create3(centers, groups, sphereCount, spheres2) {
           return spheres2 ? update9(centers, groups, sphereCount, spheres2) : fromArrays(centers, groups, sphereCount);
@@ -66556,6 +72997,9 @@ void main() {
             setBoundingSphere(sphere) {
               Sphere3D.copy(boundingSphere, sphere);
               currentHash = hashCode6(spheres2);
+            },
+            hasBoundingSphere() {
+              return currentHash === hashCode6(spheres2);
             },
             shaderData: {
               positionGroup,
@@ -66682,6 +73126,7 @@ void main() {
           alphaThickness: ParamDefinition.Numeric(0, { min: 0, max: 20, step: 1 }, { ...BaseGeometry.ShadingCategory, description: "If not zero, adjusts alpha for radius." }),
           bumpFrequency: ParamDefinition.Numeric(0, { min: 0, max: 10, step: 0.1 }, BaseGeometry.ShadingCategory),
           bumpAmplitude: ParamDefinition.Numeric(1, { min: 0, max: 5, step: 0.1 }, BaseGeometry.ShadingCategory),
+          interior: getInteriorParam(),
           lodLevels: ParamDefinition.ObjectList({
             minDistance: ParamDefinition.Numeric(0),
             maxDistance: ParamDefinition.Numeric(0),
@@ -66725,7 +73170,7 @@ void main() {
           const { instanceCount, groupCount } = locationIt;
           const positionIt = createPositionIterator(spheres2, transform);
           const color = createColors(locationIt, positionIt, theme.color);
-          const size4 = createSizes(locationIt, theme.size);
+          const size4 = createSizes(locationIt, positionIt, theme.size);
           const marker = props.instanceGranularity ? createMarkers(instanceCount, "instance") : createMarkers(instanceCount * groupCount, "groupInstance");
           const overpaint = createEmptyOverpaint();
           const transparency = createEmptyTransparency();
@@ -66769,7 +73214,8 @@ void main() {
             uBumpAmplitude: ValueCell.create(props.bumpAmplitude),
             lodLevels: spheres2.shaderData.lodLevels,
             centerBuffer: spheres2.centerBuffer,
-            groupBuffer: spheres2.groupBuffer
+            groupBuffer: spheres2.groupBuffer,
+            ...createInteriorValues(props.interior)
           };
         }
         function createValuesSimple(spheres2, props, colorValue, sizeValue, transform) {
@@ -66791,6 +73237,7 @@ void main() {
           ValueCell.updateIfChanged(values2.uAlphaThickness, props.alphaThickness);
           ValueCell.updateIfChanged(values2.uBumpFrequency, props.bumpFrequency);
           ValueCell.updateIfChanged(values2.uBumpAmplitude, props.bumpAmplitude);
+          updateInteriorValues(values2, props.interior);
           const lodLevels = getLodLevels(values2.lodLevels.ref.value);
           if (!areLodLevelsEqual(props.lodLevels, lodLevels)) {
             const count3 = values2.uVertexCount.ref.value / 6;
@@ -66848,6 +73295,7 @@ void main() {
       init_location2();
       init_substance_data();
       init_emissive_data();
+      init_interior();
       (function(TextureMesh2) {
         class DoubleBuffer {
           constructor() {
@@ -66922,7 +73370,8 @@ void main() {
           xrayShaded: ParamDefinition.Select(false, [[false, "Off"], [true, "On"], ["inverted", "Inverted"]], BaseGeometry.ShadingCategory),
           transparentBackfaces: ParamDefinition.Select("off", ParamDefinition.arrayToOptions(["off", "on", "opaque"]), BaseGeometry.ShadingCategory),
           bumpFrequency: ParamDefinition.Numeric(0, { min: 0, max: 10, step: 0.1 }, BaseGeometry.ShadingCategory),
-          bumpAmplitude: ParamDefinition.Numeric(1, { min: 0, max: 5, step: 0.1 }, BaseGeometry.ShadingCategory)
+          bumpAmplitude: ParamDefinition.Numeric(1, { min: 0, max: 5, step: 0.1 }, BaseGeometry.ShadingCategory),
+          interior: getInteriorParam()
         };
         TextureMesh2.Utils = {
           Params: TextureMesh2.Params,
@@ -67020,7 +73469,8 @@ void main() {
             dTransparentBackfaces: ValueCell.create(props.transparentBackfaces),
             uBumpFrequency: ValueCell.create(props.bumpFrequency),
             uBumpAmplitude: ValueCell.create(props.bumpAmplitude),
-            meta: ValueCell.create(textureMesh.meta)
+            meta: ValueCell.create(textureMesh.meta),
+            ...createInteriorValues(props.interior)
           };
         }
         function createValuesSimple(textureMesh, props, colorValue, sizeValue, transform) {
@@ -67039,6 +73489,7 @@ void main() {
           ValueCell.updateIfChanged(values2.dTransparentBackfaces, props.transparentBackfaces);
           ValueCell.updateIfChanged(values2.uBumpFrequency, props.bumpFrequency);
           ValueCell.updateIfChanged(values2.uBumpAmplitude, props.bumpAmplitude);
+          updateInteriorValues(values2, props.interior);
         }
         function updateBoundingSphere(values2, textureMesh) {
           const invariantBoundingSphere = Sphere3D.clone(textureMesh.boundingSphere);
@@ -67122,7 +73573,7 @@ void main() {
   function ValueSpec(kind) {
     return { type: "value", kind };
   }
-  var GlobalUniformSchema, GlobalTextureSchema, GlobalDefineSchema, InternalSchema, ColorSchema, SizeSchema, MarkerSchema, OverpaintSchema, TransparencySchema, EmissiveSchema, SubstanceSchema, ClippingSchema, BaseSchema;
+  var GlobalUniformSchema, GlobalTextureSchema, GlobalDefineSchema, InternalSchema, ColorSchema, SizeSchema, MarkerSchema, OverpaintSchema, TransparencySchema, EmissiveSchema, SubstanceSchema, ClippingSchema, BaseSchema, InteriorSchema;
   var init_schema5 = __esm({
     "node_modules/molstar/lib/mol-gl/renderable/schema.js"() {
       GlobalUniformSchema = {
@@ -67162,9 +73613,6 @@ void main() {
         uLightColor: UniformSpec("v3[]"),
         uAmbientColor: UniformSpec("v3"),
         uPickingAlphaThreshold: UniformSpec("f"),
-        uInteriorDarkening: UniformSpec("f"),
-        uInteriorColorFlag: UniformSpec("b"),
-        uInteriorColor: UniformSpec("v3"),
         uHighlightColor: UniformSpec("v3"),
         uSelectColor: UniformSpec("v3"),
         uDimColor: UniformSpec("v3"),
@@ -67331,6 +73779,10 @@ void main() {
         /** bounding sphere NOT taking aTransform into account */
         invariantBoundingSphere: ValueSpec("sphere"),
         instanceGrid: ValueSpec("instanceGrid")
+      };
+      InteriorSchema = {
+        uInteriorColor: UniformSpec("v4"),
+        uInteriorSubstance: UniformSpec("v4")
       };
     }
   });
@@ -68143,7 +74595,11 @@ void main(void) {
             setBoundingSphere(sphere) {
               Sphere3D.copy(boundingSphere, sphere);
               currentHash = hashCode6(image);
-            }
+            },
+            hasBoundingSphere() {
+              return currentHash === hashCode6(image);
+            },
+            meta: {}
           };
           return image;
         }
@@ -68289,6 +74745,7 @@ void main(void) {
       init_clipping_data();
       init_substance_data();
       init_emissive_data();
+      init_interior();
       (function(Cylinders2) {
         function create3(mappings, indices2, groups, starts, ends, scales, caps, colorModes, cylinderCount, cylinders) {
           return cylinders ? update9(mappings, indices2, groups, starts, ends, scales, caps, colorModes, cylinderCount, cylinders) : fromArrays(mappings, indices2, groups, starts, ends, scales, caps, colorModes, cylinderCount);
@@ -68355,6 +74812,9 @@ void main(void) {
             setBoundingSphere(sphere) {
               Sphere3D.copy(boundingSphere, sphere);
               currentHash = hashCode6(cylinders);
+            },
+            hasBoundingSphere() {
+              return currentHash === hashCode6(cylinders);
             }
           };
           return cylinders;
@@ -68394,6 +74854,7 @@ void main(void) {
           solidInterior: ParamDefinition.Boolean(true, BaseGeometry.ShadingCategory),
           bumpFrequency: ParamDefinition.Numeric(0, { min: 0, max: 10, step: 0.1 }, BaseGeometry.ShadingCategory),
           bumpAmplitude: ParamDefinition.Numeric(1, { min: 0, max: 5, step: 0.1 }, BaseGeometry.ShadingCategory),
+          interior: getInteriorParam(),
           colorMode: ParamDefinition.Select("default", ParamDefinition.arrayToOptions(["default", "interpolate"]), BaseGeometry.ShadingCategory)
         };
         Cylinders2.Utils = {
@@ -68430,7 +74891,7 @@ void main(void) {
           const { instanceCount, groupCount } = locationIt;
           const positionIt = createPositionIterator(cylinders, transform2);
           const color = createColors(locationIt, positionIt, theme.color);
-          const size4 = createSizes(locationIt, theme.size);
+          const size4 = createSizes(locationIt, positionIt, theme.size);
           const marker = props.instanceGranularity ? createMarkers(instanceCount, "instance") : createMarkers(instanceCount * groupCount, "groupInstance");
           const overpaint = createEmptyOverpaint();
           const transparency = createEmptyTransparency();
@@ -68474,7 +74935,8 @@ void main(void) {
             dSolidInterior: ValueCell.create(props.solidInterior),
             uBumpFrequency: ValueCell.create(props.bumpFrequency),
             uBumpAmplitude: ValueCell.create(props.bumpAmplitude),
-            dDualColor: ValueCell.create(props.colorMode === "interpolate")
+            dDualColor: ValueCell.create(props.colorMode === "interpolate"),
+            ...createInteriorValues(props.interior)
           };
         }
         function createValuesSimple(cylinders, props, colorValue, sizeValue, transform2) {
@@ -68494,6 +74956,7 @@ void main(void) {
           ValueCell.updateIfChanged(values2.uBumpFrequency, props.bumpFrequency);
           ValueCell.updateIfChanged(values2.uBumpAmplitude, props.bumpAmplitude);
           ValueCell.updateIfChanged(values2.dDualColor, props.colorMode === "interpolate");
+          updateInteriorValues(values2, props.interior);
         }
         function updateBoundingSphere(values2, cylinders) {
           const invariantBoundingSphere = Sphere3D.clone(cylinders.boundingSphere);
@@ -68572,7 +75035,7 @@ void main(void) {
             case "text":
               return geometry.charCount * 4;
             case "lines":
-              return geometry.lineCount * 4;
+              return geometry.vertexCount;
             case "direct-volume":
               const [x, y, z] = geometry.gridDimension.ref.value;
               return x * y * z;
@@ -68776,7 +75239,8 @@ void main(void) {
         dTransparentBackfaces: DefineSpec("string", ["off", "on", "opaque"]),
         uBumpFrequency: UniformSpec("f", "material"),
         uBumpAmplitude: UniformSpec("f", "material"),
-        meta: ValueSpec("unknown")
+        meta: ValueSpec("unknown"),
+        ...InteriorSchema
       };
     }
   });
@@ -68820,7 +75284,9 @@ void main(void) {
         elements: ElementsSpec("uint32"),
         dLineSizeAttenuation: DefineSpec("boolean"),
         uDoubleSided: UniformSpec("b", "material"),
-        dFlipSided: DefineSpec("boolean")
+        dFlipSided: DefineSpec("boolean"),
+        stripCount: ValueSpec("number"),
+        stripOffsets: ValueSpec("uint32")
       };
     }
   });
@@ -68853,7 +75319,8 @@ void main(void) {
         uBumpAmplitude: UniformSpec("f", "material"),
         lodLevels: ValueSpec("unknown"),
         centerBuffer: ValueSpec("float32"),
-        groupBuffer: ValueSpec("float32")
+        groupBuffer: ValueSpec("float32"),
+        ...InteriorSchema
       };
     }
   });
@@ -68914,7 +75381,8 @@ void main(void) {
         dTransparentBackfaces: DefineSpec("string", ["off", "on", "opaque"]),
         uBumpFrequency: UniformSpec("f", "material"),
         uBumpAmplitude: UniformSpec("f", "material"),
-        meta: ValueSpec("unknown")
+        meta: ValueSpec("unknown"),
+        ...InteriorSchema
       };
     }
   });
@@ -68979,7 +75447,8 @@ void main(void) {
         dSolidInterior: DefineSpec("boolean"),
         uBumpFrequency: UniformSpec("f", "material"),
         uBumpAmplitude: UniformSpec("f", "material"),
-        dDualColor: DefineSpec("boolean")
+        dDualColor: DefineSpec("boolean"),
+        ...InteriorSchema
       };
     }
   });
@@ -69579,7 +76048,9 @@ void main(void) {
       (c5 === 70 || c5 === 102) && (c22 === 69 || c22 === 101) || // FE
       (c5 === 83 || c5 === 115) && (c22 === 73 || c22 === 105) || // SI
       (c5 === 66 || c5 === 98) && (c22 === 82 || c22 === 114) || // BR
-      (c5 === 65 || c5 === 97) && (c22 === 83 || c22 === 115))
+      (c5 === 65 || c5 === 97) && (c22 === 83 || c22 === 115) || // AS
+      (c5 === 76 || c5 === 108) && (c22 === 73 || c22 === 105) || // LI
+      (c5 === 71 || c5 === 103) && (c22 === 65 || c22 === 97))
         return TokenBuilder.add(tokens, s, s + 2);
     }
     if (c5 === 67 || c5 === 99 || // C c
@@ -69620,7 +76091,7 @@ void main(void) {
   var init_util11 = __esm({
     "node_modules/molstar/lib/mol-model-formats/structure/util.js"() {
       init_tokenizer();
-      TwoCharElementNames = /* @__PURE__ */ new Set(["NA", "CL", "FE", "SI", "BR", "AS", "LI"]);
+      TwoCharElementNames = /* @__PURE__ */ new Set(["NA", "CL", "FE", "SI", "BR", "AS", "LI", "GA"]);
       OneCharElementNames = /* @__PURE__ */ new Set(["C", "H", "N", "O", "P", "S", "F", "B"]);
       reTrimSpacesAndNumbers = /^[\s\d]+|[\s\d]+$/g;
     }
@@ -70106,7 +76577,7 @@ void main(void) {
     const compounds = [];
     for (let i = lineStart; i < lineEnd; i++) {
       const line = getLine(i);
-      const cmpnd = line.substr(10, 70).trim();
+      const cmpnd = line.substring(10, 80).trim();
       const cmpndSpecEnd = cmpnd.indexOf(":");
       const cmpndSpec = cmpnd.substring(0, cmpndSpecEnd);
       let value;
@@ -70147,8 +76618,8 @@ void main(void) {
     const hetnams = /* @__PURE__ */ new Map();
     for (let i = lineStart; i < lineEnd; i++) {
       const line = getLine(i);
-      const het = line.substr(11, 3).trim();
-      const name = line.substr(15).trim();
+      const het = line.substring(11, 14).trim();
+      const name = line.substring(15).trim();
       if (hetnams.has(het)) {
         hetnams.set(het, `${hetnams.get(het)} ${name}`);
       } else {
@@ -70157,9 +76628,129 @@ void main(void) {
     }
     return hetnams;
   }
+  function parseSeqres(lines, lineStart, lineEnd) {
+    const getLine = (n) => lines.data.substring(lines.indices[2 * n], lines.indices[2 * n + 1]);
+    const seqresMap = /* @__PURE__ */ new Map();
+    for (let i = lineStart; i < lineEnd; i++) {
+      const line = getLine(i);
+      const chainId = line.substring(11, 12);
+      const residues2 = line.substring(19).trim().split(/\s+/);
+      if (!seqresMap.has(chainId)) {
+        seqresMap.set(chainId, []);
+      }
+      seqresMap.get(chainId).push(...residues2);
+    }
+    return seqresMap;
+  }
+  function getEntityPolySeq(seqresMap, getEntityIdForChain) {
+    const epsEntityIds = [];
+    const epsNums = [];
+    const epsMonIds = [];
+    const epsHeteros = [];
+    const processedEntities = /* @__PURE__ */ new Set();
+    for (const [chainId, residues2] of seqresMap) {
+      const entityId = getEntityIdForChain(chainId);
+      if (!entityId || processedEntities.has(entityId))
+        continue;
+      processedEntities.add(entityId);
+      for (let j = 0; j < residues2.length; j++) {
+        epsEntityIds.push(entityId);
+        epsNums.push(j + 1);
+        epsMonIds.push(residues2[j]);
+        epsHeteros.push("no");
+      }
+    }
+    if (epsEntityIds.length > 0) {
+      const entity_poly_seq = {
+        entity_id: CifField.ofStrings(epsEntityIds),
+        num: CifField.ofNumbers(epsNums),
+        mon_id: CifField.ofStrings(epsMonIds),
+        hetero: CifField.ofStrings(epsHeteros)
+      };
+      return CifCategory.ofFields("entity_poly_seq", entity_poly_seq);
+    }
+    return void 0;
+  }
+  function getPdbxUnobsOrZeroOccResidues(seqresMap, getEntityIdForChain, atom_site, modelCount) {
+    const polymerEntityIds = /* @__PURE__ */ new Map();
+    for (const chainId of seqresMap.keys()) {
+      const entityId = getEntityIdForChain(chainId);
+      if (entityId)
+        polymerEntityIds.set(chainId, entityId);
+    }
+    const observedResidues = /* @__PURE__ */ new Set();
+    const authToLabelAsym = /* @__PURE__ */ new Map();
+    const rowCount = atom_site.label_asym_id.rowCount;
+    for (let i = 0; i < rowCount; ++i) {
+      const authAsym = atom_site.auth_asym_id.str(i);
+      const entityId = atom_site.label_entity_id.str(i);
+      const polymerEntityId = polymerEntityIds.get(authAsym);
+      if (polymerEntityId && entityId !== polymerEntityId)
+        continue;
+      const labelAsym = atom_site.label_asym_id.str(i);
+      const labelSeq = atom_site.label_seq_id.int(i);
+      const modelN = atom_site.pdbx_PDB_model_num.int(i);
+      observedResidues.add(`${modelN}|${labelAsym}|${labelSeq}`);
+      if (!authToLabelAsym.has(authAsym)) {
+        authToLabelAsym.set(authAsym, labelAsym);
+      }
+    }
+    const unobsIds = [];
+    const unobsModelNums = [];
+    const unobsLabelAsymIds = [];
+    const unobsLabelCompIds = [];
+    const unobsLabelSeqIds = [];
+    const unobsAuthAsymIds = [];
+    const unobsAuthCompIds = [];
+    const unobsAuthSeqIds = [];
+    const unobsPolymerFlags = [];
+    const unobsOccupancyFlags = [];
+    let unobsId = 0;
+    modelCount = Math.max(modelCount, 1);
+    for (let m = 1; m <= modelCount; ++m) {
+      for (const [chainId, residues2] of seqresMap) {
+        const labelAsymId = authToLabelAsym.get(chainId);
+        if (!labelAsymId)
+          continue;
+        for (let j = 0; j < residues2.length; j++) {
+          const seqId2 = j + 1;
+          if (!observedResidues.has(`${m}|${labelAsymId}|${seqId2}`)) {
+            unobsId++;
+            unobsIds.push(unobsId);
+            unobsModelNums.push(m);
+            unobsLabelAsymIds.push(labelAsymId);
+            unobsLabelCompIds.push(residues2[j]);
+            unobsLabelSeqIds.push(seqId2);
+            unobsAuthAsymIds.push(chainId);
+            unobsAuthCompIds.push(residues2[j]);
+            unobsAuthSeqIds.push(seqId2);
+            unobsPolymerFlags.push("y");
+            unobsOccupancyFlags.push(1);
+          }
+        }
+      }
+    }
+    if (unobsIds.length > 0) {
+      const pdbx_unobs = {
+        id: CifField.ofNumbers(unobsIds),
+        PDB_model_num: CifField.ofNumbers(unobsModelNums),
+        polymer_flag: CifField.ofStrings(unobsPolymerFlags),
+        occupancy_flag: CifField.ofNumbers(unobsOccupancyFlags),
+        label_asym_id: CifField.ofStrings(unobsLabelAsymIds),
+        label_comp_id: CifField.ofStrings(unobsLabelCompIds),
+        label_seq_id: CifField.ofNumbers(unobsLabelSeqIds),
+        auth_asym_id: CifField.ofStrings(unobsAuthAsymIds),
+        auth_comp_id: CifField.ofStrings(unobsAuthCompIds),
+        auth_seq_id: CifField.ofNumbers(unobsAuthSeqIds)
+      };
+      return CifCategory.ofFields("pdbx_unobs_or_zero_occ_residues", pdbx_unobs);
+    }
+    return void 0;
+  }
   var Spec;
   var init_entity2 = __esm({
     "node_modules/molstar/lib/mol-model-formats/structure/pdb/entity.js"() {
+      init_cif2();
       Spec = {
         "MOL_ID": "",
         "MOLECULE": "",
@@ -70170,6 +76761,296 @@ void main(void) {
         "ENGINEERED": "",
         "MUTATION": "",
         "OTHER_DETAILS": ""
+      };
+    }
+  });
+
+  // node_modules/molstar/lib/mol-model/sequence/alignment/substitution-matrix.js
+  function prepareMatrix(cellNames, mat) {
+    let j;
+    let i = 0;
+    const matDict = {};
+    mat.forEach((row) => {
+      j = 0;
+      const rowDict = {};
+      row.forEach((elm) => rowDict[cellNames[j++]] = elm);
+      matDict[cellNames[i++]] = rowDict;
+    });
+    return matDict;
+  }
+  var aminoacidsX, aminoacids, blosum62x, blosum62, SubstitutionMatrices;
+  var init_substitution_matrix = __esm({
+    "node_modules/molstar/lib/mol-model/sequence/alignment/substitution-matrix.js"() {
+      aminoacidsX = "ACDEFGHIKLMNPQRSTVWY";
+      aminoacids = "ARNDCQEGHILKMFPSTWYVBZX";
+      blosum62x = [
+        [4, 0, -2, -1, -2, 0, -2, -1, -1, -1, -1, -2, -1, -1, -1, 1, 0, 0, -3, -2],
+        // A
+        [0, 9, -3, -4, -2, -3, -3, -1, -3, -1, -1, -3, -3, -3, -3, -1, -1, -1, -2, -2],
+        // C
+        [-2, -3, 6, 2, -3, -1, -1, -3, -1, -4, -3, 1, -1, 0, -2, 0, -1, -3, -4, -3],
+        // D
+        [-1, -4, 2, 5, -3, -2, 0, -3, 1, -3, -2, 0, -1, 2, 0, 0, -1, -2, -3, -2],
+        // E
+        [-2, -2, -3, -3, 6, -3, -1, 0, -3, 0, 0, -3, -4, -3, -3, -2, -2, -1, 1, 3],
+        // F
+        [0, -3, -1, -2, -3, 6, -2, -4, -2, -4, -3, 0, -2, -2, -2, 0, -2, -3, -2, -3],
+        // G
+        [-2, -3, -1, 0, -1, -2, 8, -3, -1, -3, -2, 1, -2, 0, 0, -1, -2, -3, -2, 2],
+        // H
+        [-1, -1, -3, -3, 0, -4, -3, 4, -3, 2, 1, -3, -3, -3, -3, -2, -1, 3, -3, -1],
+        // I
+        [-1, -3, -1, 1, -3, -2, -1, -3, 5, -2, -1, 0, -1, 1, 2, 0, -1, -2, -3, -2],
+        // K
+        [-1, -1, -4, -3, 0, -4, -3, 2, -2, 4, 2, -3, -3, -2, -2, -2, -1, 1, -2, -1],
+        // L
+        [-1, -1, -3, -2, 0, -3, -2, 1, -1, 2, 5, -2, -2, 0, -1, -1, -1, 1, -1, -1],
+        // M
+        [-2, -3, 1, 0, -3, 0, 1, -3, 0, -3, -2, 6, -2, 0, 0, 1, 0, -3, -4, -2],
+        // N
+        [-1, -3, -1, -1, -4, -2, -2, -3, -1, -3, -2, -2, 7, -1, -2, -1, -1, -2, -4, -3],
+        // P
+        [-1, -3, 0, 2, -3, -2, 0, -3, 1, -2, 0, 0, -1, 5, 1, 0, -1, -2, -2, -1],
+        // Q
+        [-1, -3, -2, 0, -3, -2, 0, -3, 2, -2, -1, 0, -2, 1, 5, -1, -1, -3, -3, -2],
+        // R
+        [1, -1, 0, 0, -2, 0, -1, -2, 0, -2, -1, 1, -1, 0, -1, 4, 1, -2, -3, -2],
+        // S
+        [0, -1, -1, -1, -2, -2, -2, -1, -1, -1, -1, 0, -1, -1, -1, 1, 5, 0, -2, -2],
+        // T
+        [0, -1, -3, -2, -1, -3, -3, 3, -2, 1, 1, -3, -2, -2, -3, -2, 0, 4, -3, -1],
+        // V
+        [-3, -2, -4, -3, 1, -2, -2, -3, -3, -2, -1, -4, -4, -2, -3, -3, -2, -3, 11, 2],
+        // W
+        [-2, -2, -3, -2, 3, -3, 2, -1, -2, -1, -1, -2, -3, -1, -2, -2, -2, -1, 2, 7]
+        // Y
+      ];
+      blosum62 = [
+        // A  R  N  D  C  Q  E  G  H  I  L  K  M  F  P  S  T  W  Y  V  B  Z  X
+        [4, -1, -2, -2, 0, -1, -1, 0, -2, -1, -1, -1, -1, -2, -1, 1, 0, -3, -2, 0, -2, -1, 0],
+        // A
+        [-1, 5, 0, -2, -3, 1, 0, -2, 0, -3, -2, 2, -1, -3, -2, -1, -1, -3, -2, -3, -1, 0, -1],
+        // R
+        [-2, 0, 6, 1, -3, 0, 0, 0, 1, -3, -3, 0, -2, -3, -2, 1, 0, -4, -2, -3, 3, 0, -1],
+        // N
+        [-2, -2, 1, 6, -3, 0, 2, -1, -1, -3, -4, -1, -3, -3, -1, 0, -1, -4, -3, -3, 4, 1, -1],
+        // D
+        [0, -3, -3, -3, 9, -3, -4, -3, -3, -1, -1, -3, -1, -2, -3, -1, -1, -2, -2, -1, -3, -3, -2],
+        // C
+        [-1, 1, 0, 0, -3, 5, 2, -2, 0, -3, -2, 1, 0, -3, -1, 0, -1, -2, -1, -2, 0, 3, -1],
+        // Q
+        [-1, 0, 0, 2, -4, 2, 5, -2, 0, -3, -3, 1, -2, -3, -1, 0, -1, -3, -2, -2, 1, 4, -1],
+        // E
+        [0, -2, 0, -1, -3, -2, -2, 6, -2, -4, -4, -2, -3, -3, -2, 0, -2, -2, -3, -3, -1, -2, -1],
+        // G
+        [-2, 0, 1, -1, -3, 0, 0, -2, 8, -3, -3, -1, -2, -1, -2, -1, -2, -2, 2, -3, 0, 0, -1],
+        // H
+        [-1, -3, -3, -3, -1, -3, -3, -4, -3, 4, 2, -3, 1, 0, -3, -2, -1, -3, -1, 3, -3, -3, -1],
+        // I
+        [-1, -2, -3, -4, -1, -2, -3, -4, -3, 2, 4, -2, 2, 0, -3, -2, -1, -2, -1, 1, -4, -3, -1],
+        // L
+        [-1, 2, 0, -1, -3, 1, 1, -2, -1, -3, -2, 5, -1, -3, -1, 0, -1, -3, -2, -2, 0, 1, -1],
+        // K
+        [-1, -1, -2, -3, -1, 0, -2, -3, -2, 1, 2, -1, 5, 0, -2, -1, -1, -1, -1, 1, -3, -1, -1],
+        // M
+        [-2, -3, -3, -3, -2, -3, -3, -3, -1, 0, 0, -3, 0, 6, -4, -2, -2, 1, 3, -1, -3, -3, -1],
+        // F
+        [-1, -2, -2, -1, -3, -1, -1, -2, -2, -3, -3, -1, -2, -4, 7, -1, -1, -4, -3, -2, -2, -1, -2],
+        // P
+        [1, -1, 1, 0, -1, 0, 0, 0, -1, -2, -2, 0, -1, -2, -1, 4, 1, -3, -2, -2, 0, 0, 0],
+        // S
+        [0, -1, 0, -1, -1, -1, -1, -2, -2, -1, -1, -1, -1, -2, -1, 1, 5, -2, -2, 0, -1, -1, 0],
+        // T
+        [-3, -3, -4, -4, -2, -2, -3, -2, -2, -3, -2, -3, -1, 1, -4, -3, -2, 11, 2, -3, -4, -3, -2],
+        // W
+        [-2, -2, -2, -3, -2, -1, -2, -3, 2, -1, -1, -2, -1, 3, -3, -2, -2, 2, 7, -1, -3, -2, -1],
+        // Y
+        [0, -3, -3, -3, -1, -2, -2, -3, -3, 3, 1, -2, 1, -1, -2, -2, 0, -3, -1, 4, -3, -2, -1],
+        // V
+        [-2, -1, 3, 4, -3, 0, 1, -1, 0, -3, -4, 0, -3, -3, -2, 0, -1, -4, -3, -3, 4, 1, -1],
+        // B
+        [-1, 0, 0, 1, -3, 3, 4, -2, 0, -3, -3, 1, -1, -3, -1, 0, -1, -3, -2, -2, 1, 4, -1],
+        // Z
+        [0, -1, -1, -1, -2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -2, 0, 0, -2, -1, -1, -1, -1, -1]
+        // X
+      ];
+      SubstitutionMatrices = (() => ({
+        blosum62: prepareMatrix(aminoacids, blosum62),
+        blosum62x: prepareMatrix(aminoacidsX, blosum62x)
+      }))();
+    }
+  });
+
+  // node_modules/molstar/lib/mol-model/sequence/alignment/alignment.js
+  function align(seqA, seqB, options = {}) {
+    const o = { ...DefaultAlignmentOptions, ...options };
+    const alignment = new Alignment(seqA, seqB, o);
+    alignment.calculate();
+    return alignment.trace();
+  }
+  var DefaultAlignmentOptions, Alignment;
+  var init_alignment = __esm({
+    "node_modules/molstar/lib/mol-model/sequence/alignment/alignment.js"() {
+      init_debug();
+      init_substitution_matrix();
+      DefaultAlignmentOptions = {
+        gapPenalty: -11,
+        gapExtensionPenalty: -1,
+        substMatrix: "default"
+      };
+      Alignment = class {
+        constructor(seqA, seqB, options) {
+          this.seqA = seqA;
+          this.seqB = seqB;
+          this.S = [];
+          this.V = [];
+          this.H = [];
+          this.gapPenalty = options.gapPenalty;
+          this.gapExtensionPenalty = options.gapExtensionPenalty;
+          this.substMatrix = options.substMatrix === "default" ? void 0 : SubstitutionMatrices[options.substMatrix];
+          this.n = this.seqA.length;
+          this.m = this.seqB.length;
+        }
+        initMatrices() {
+          const { n, m, gapPenalty, S, V, H } = this;
+          for (let i = 0; i <= n; ++i) {
+            S[i] = [], V[i] = [], H[i] = [];
+            for (let j = 0; j <= m; ++j) {
+              S[i][j] = 0, V[i][j] = 0, H[i][j] = 0;
+            }
+          }
+          for (let i = 0; i <= n; ++i) {
+            S[i][0] = gapPenalty;
+            H[i][0] = -Infinity;
+          }
+          for (let j = 0; j <= m; ++j) {
+            S[0][j] = gapPenalty;
+            V[0][j] = -Infinity;
+          }
+          S[0][0] = 0;
+        }
+        makeScoreFn() {
+          const { seqA, seqB, substMatrix } = this;
+          if (substMatrix) {
+            return function score(i, j) {
+              var _a;
+              const cA = seqA[i];
+              const cB = seqB[j];
+              const val = (_a = substMatrix[cA]) === null || _a === void 0 ? void 0 : _a[cB];
+              if (isDebugMode && val === void 0) {
+                console.warn(`Substitution matrix has no entry for residue pair ('${cA}', '${cB}') (seqA[${i}], seqB[${j}]). Non-standard residues are not supported with BLOSUM matrices.`);
+              }
+              return val !== null && val !== void 0 ? val : 0;
+            };
+          } else {
+            return function scoreNoSubstMat(i, j) {
+              const cA = seqA[i];
+              const cB = seqB[j];
+              return cA === cB ? 5 : -3;
+            };
+          }
+        }
+        calculate() {
+          this.initMatrices();
+          const scoreFn = this.makeScoreFn();
+          const { V, H, S, n, m, gapExtensionPenalty, gapPenalty } = this;
+          let Vi1, Si1, Vi, Hi, Si;
+          for (let i = 1; i <= n; ++i) {
+            Si1 = S[i - 1], Vi1 = V[i - 1];
+            Vi = V[i], Hi = H[i], Si = S[i];
+            for (let j = 1; j <= m; ++j) {
+              Vi[j] = Math.max(Si1[j] + gapPenalty, Vi1[j] + gapExtensionPenalty);
+              Hi[j] = Math.max(Si[j - 1] + gapPenalty, Hi[j - 1] + gapExtensionPenalty);
+              Si[j] = Math.max(
+                Si1[j - 1] + scoreFn(i - 1, j - 1),
+                // match
+                Vi[j],
+                // del
+                Hi[j]
+                // ins
+              );
+            }
+          }
+        }
+        trace() {
+          const scoreFn = this.makeScoreFn();
+          const { V, H, S, seqA, seqB, gapExtensionPenalty, gapPenalty } = this;
+          let i = this.n;
+          let j = this.m;
+          let mat;
+          let score;
+          const aliA = [];
+          const aliB = [];
+          if (S[i][j] >= V[i][j]) {
+            mat = "S";
+            score = S[i][j];
+          } else if (V[i][j] >= H[i][j]) {
+            mat = "V";
+            score = V[i][j];
+          } else {
+            mat = "H";
+            score = H[i][j];
+          }
+          while (i > 0 && j > 0) {
+            if (mat === "S") {
+              if (S[i][j] === S[i - 1][j - 1] + scoreFn(i - 1, j - 1)) {
+                aliA.push(seqA[i - 1]);
+                aliB.push(seqB[j - 1]);
+                --i;
+                --j;
+                mat = "S";
+              } else if (S[i][j] === V[i][j]) {
+                mat = "V";
+              } else if (S[i][j] === H[i][j]) {
+                mat = "H";
+              } else {
+                --i;
+                --j;
+              }
+            } else if (mat === "V") {
+              if (V[i][j] === V[i - 1][j] + gapExtensionPenalty) {
+                aliA.push(seqA[i - 1]);
+                aliB.push("-");
+                --i;
+                mat = "V";
+              } else if (V[i][j] === S[i - 1][j] + gapPenalty) {
+                aliA.push(seqA[i - 1]);
+                aliB.push("-");
+                --i;
+                mat = "S";
+              } else {
+                --i;
+              }
+            } else if (mat === "H") {
+              if (H[i][j] === H[i][j - 1] + gapExtensionPenalty) {
+                aliA.push("-");
+                aliB.push(seqB[j - 1]);
+                --j;
+                mat = "H";
+              } else if (H[i][j] === S[i][j - 1] + gapPenalty) {
+                aliA.push("-");
+                aliB.push(seqB[j - 1]);
+                --j;
+                mat = "S";
+              } else {
+                --j;
+              }
+            }
+          }
+          while (i > 0) {
+            aliA.push(seqA[i - 1]);
+            aliB.push("-");
+            --i;
+          }
+          while (j > 0) {
+            aliA.push("-");
+            aliB.push(seqB[j - 1]);
+            --j;
+          }
+          aliA.reverse();
+          aliB.reverse();
+          return { aliA, aliB, score };
+        }
       };
     }
   });
@@ -70199,6 +77080,65 @@ void main(void) {
       partial_charge: ts()
     };
   }
+  function alignCompIdsToSeqres(seqres, observed) {
+    const n = observed.length;
+    const m = seqres.length;
+    if (n === 0)
+      return [];
+    if (m === 0)
+      return new Array(n).fill(UNALIGNED);
+    const { aliA, aliB } = align(observed, seqres);
+    const result2 = new Array(n).fill(UNALIGNED);
+    let obsIdx = 0, seqresIdx = 0;
+    for (let k = 0, kl = aliA.length; k < kl; k++) {
+      const hasObs = aliA[k] !== "-";
+      const hasSeqres = aliB[k] !== "-";
+      if (hasObs && hasSeqres) {
+        result2[obsIdx] = seqresIdx + 1;
+        obsIdx++;
+        seqresIdx++;
+      } else if (hasObs) {
+        obsIdx++;
+      } else {
+        seqresIdx++;
+      }
+    }
+    return result2;
+  }
+  function computeSeqresAlignments(seqresMap, id, pdbx_PDB_model_num, auth_asym_id, auth_seq_id, pdbx_PDB_ins_code, auth_comp_id) {
+    const seqresAlignments = /* @__PURE__ */ new Map();
+    if (!seqresMap)
+      return seqresAlignments;
+    const chainObserved = /* @__PURE__ */ new Map();
+    let prevChain = "", prevSeqId = -99999, prevInsCode = "___";
+    const firstModel = pdbx_PDB_model_num.str(0);
+    for (let i = 0, il = id.rowCount; i < il; ++i) {
+      if (pdbx_PDB_model_num.str(i) !== firstModel)
+        break;
+      const chain2 = auth_asym_id.str(i);
+      const seqId2 = auth_seq_id.int(i);
+      const insCode = pdbx_PDB_ins_code.str(i);
+      if (chain2 !== prevChain || seqId2 !== prevSeqId || insCode !== prevInsCode) {
+        if (!chainObserved.has(chain2))
+          chainObserved.set(chain2, []);
+        chainObserved.get(chain2).push(auth_comp_id.str(i));
+        prevChain = chain2;
+        prevSeqId = seqId2;
+        prevInsCode = insCode;
+      }
+    }
+    for (const [chainId, observed] of chainObserved) {
+      const seqres = seqresMap.get(chainId);
+      if (seqres && seqres.length > 0) {
+        seqresAlignments.set(chainId, alignCompIdsToSeqres(seqres, observed));
+      }
+    }
+    return seqresAlignments;
+  }
+  function initialLabelSeqId(alignment, seqId2, useLinear) {
+    const alignedPos = alignment ? alignment[0] : UNALIGNED;
+    return alignedPos !== UNALIGNED ? alignedPos : useLinear ? 1 : seqId2;
+  }
   function getAtomSite(sites, labelAsymIdHelper, options) {
     labelAsymIdHelper.clear();
     const pdbx_PDB_model_num = CifField.ofStrings(sites.pdbx_PDB_model_num);
@@ -70208,23 +77148,28 @@ void main(void) {
     const auth_atom_id = CifField.ofTokens(sites.auth_atom_id);
     const auth_comp_id = CifField.ofTokens(sites.auth_comp_id);
     const id = CifField.ofStrings(sites.id);
+    let useLinearLabelSeqId = !!options.seqresMap;
+    if (!useLinearLabelSeqId) {
+      for (let i = 0, il = id.rowCount; i < il; ++i) {
+        if (pdbx_PDB_ins_code.str(i) !== "") {
+          useLinearLabelSeqId = true;
+          break;
+        }
+      }
+    }
+    const seqresAlignments = computeSeqresAlignments(options.seqresMap, id, pdbx_PDB_model_num, auth_asym_id, auth_seq_id, pdbx_PDB_ins_code, auth_comp_id);
     let currModelNum = pdbx_PDB_model_num.str(0);
     let currAsymId = auth_asym_id.str(0);
     let currSeqId = auth_seq_id.int(0);
     let currInsCode = pdbx_PDB_ins_code.str(0);
-    let currLabelSeqId = currSeqId;
+    let alignmentForChain = seqresAlignments.get(currAsymId);
+    let chainResidueIdx = 0;
+    let currLabelSeqId = initialLabelSeqId(alignmentForChain, currSeqId, useLinearLabelSeqId);
     const asymIdCounts = /* @__PURE__ */ new Map();
     const atomIdCounts = /* @__PURE__ */ new Map();
     const labelAsymIds = [];
     const labelAtomIds = [];
     const labelSeqIds = [];
-    let hasInsCode = false;
-    for (let i = 0, il = id.rowCount; i < il; ++i) {
-      if (pdbx_PDB_ins_code.str(i) !== "") {
-        hasInsCode = true;
-        break;
-      }
-    }
     for (let i = 0, il = id.rowCount; i < il; ++i) {
       const modelNum = pdbx_PDB_model_num.str(i);
       const asymId = auth_asym_id.str(i);
@@ -70238,26 +77183,30 @@ void main(void) {
         currAsymId = asymId;
         currSeqId = seqId2;
         currInsCode = insCode;
-        currLabelSeqId = seqId2;
+        alignmentForChain = seqresAlignments.get(asymId);
+        chainResidueIdx = 0;
+        currLabelSeqId = initialLabelSeqId(alignmentForChain, currSeqId, useLinearLabelSeqId);
       } else if (currAsymId !== asymId) {
         atomIdCounts.clear();
         currAsymId = asymId;
         currSeqId = seqId2;
         currInsCode = insCode;
-        currLabelSeqId = seqId2;
-      } else if (currSeqId !== seqId2) {
+        alignmentForChain = seqresAlignments.get(asymId);
+        chainResidueIdx = 0;
+        currLabelSeqId = initialLabelSeqId(alignmentForChain, seqId2, useLinearLabelSeqId);
+      } else if (currSeqId !== seqId2 || currInsCode !== insCode) {
         atomIdCounts.clear();
-        if (currSeqId === currLabelSeqId) {
+        chainResidueIdx++;
+        const alignedPos = alignmentForChain && chainResidueIdx < alignmentForChain.length ? alignmentForChain[chainResidueIdx] : UNALIGNED;
+        if (alignedPos !== UNALIGNED) {
+          currLabelSeqId = alignedPos;
+        } else if (currSeqId === currLabelSeqId && !useLinearLabelSeqId) {
           currLabelSeqId = seqId2;
         } else {
           currLabelSeqId += 1;
         }
         currSeqId = seqId2;
         currInsCode = insCode;
-      } else if (currInsCode !== insCode) {
-        atomIdCounts.clear();
-        currInsCode = insCode;
-        currLabelSeqId += 1;
       }
       labelAsymIds[i] = labelAsymIdHelper.get(i);
       if (atomIdCounts.has(atomId)) {
@@ -70268,13 +77217,13 @@ void main(void) {
         atomIdCounts.set(atomId, 0);
       }
       labelAtomIds[i] = atomId;
-      if (hasInsCode) {
+      if (useLinearLabelSeqId) {
         labelSeqIds[i] = currLabelSeqId;
       }
     }
     const labelAsymId = Column.ofStringArray(labelAsymIds);
     const labelAtomId = Column.ofStringArray(labelAtomIds);
-    const label_seq_id = hasInsCode ? CifField.ofColumn(Column.ofIntArray(labelSeqIds)) : CifField.ofUndefined(sites.index, Column.Schema.int);
+    const label_seq_id = useLinearLabelSeqId ? CifField.ofColumn(Column.ofIntArray(labelSeqIds)) : CifField.ofUndefined(sites.index, Column.Schema.int);
     return {
       auth_asym_id,
       auth_atom_id,
@@ -70299,7 +77248,7 @@ void main(void) {
       partial_charge: CifField.ofTokens(sites.partial_charge)
     };
   }
-  function addAtom(sites, model, data, s, e, isPdbqt) {
+  function addAtom(sites, model, data, s, e, variant) {
     const { data: str11 } = data;
     const length = e - s;
     TokenBuilder.addToken(sites.group_PDB, Tokenizer.trim(data, s, s + 6));
@@ -70322,30 +77271,35 @@ void main(void) {
     TokenBuilder.addToken(sites.Cartn_x, Tokenizer.trim(data, s + 30, s + 38));
     TokenBuilder.addToken(sites.Cartn_y, Tokenizer.trim(data, s + 38, s + 46));
     TokenBuilder.addToken(sites.Cartn_z, Tokenizer.trim(data, s + 46, s + 54));
-    TokenBuilder.addToken(sites.occupancy, Tokenizer.trim(data, s + 54, s + 60));
-    if (length >= 66) {
-      TokenBuilder.addToken(sites.B_iso_or_equiv, Tokenizer.trim(data, s + 60, s + 66));
+    if (variant === "pqr") {
+      TokenBuilder.addToken(sites.partial_charge, Tokenizer.trim(data, s + 54, s + 62));
+      guessElementSymbolTokens(sites.type_symbol, str11, s + 12, s + 16);
     } else {
-      TokenBuilder.add(sites.B_iso_or_equiv, 0, 0);
-    }
-    if (isPdbqt) {
-      TokenBuilder.addToken(sites.partial_charge, Tokenizer.trim(data, s + 70, s + 76));
-    } else {
-    }
-    if (length >= 78 && !isPdbqt) {
-      Tokenizer.trim(data, s + 76, s + 78);
-      if (data.tokenStart < data.tokenEnd) {
-        TokenBuilder.addToken(sites.type_symbol, data);
+      TokenBuilder.addToken(sites.occupancy, Tokenizer.trim(data, s + 54, s + 60));
+      if (length >= 66) {
+        TokenBuilder.addToken(sites.B_iso_or_equiv, Tokenizer.trim(data, s + 60, s + 66));
+      } else {
+        TokenBuilder.add(sites.B_iso_or_equiv, 0, 0);
+      }
+      if (variant === "pdbqt") {
+        TokenBuilder.addToken(sites.partial_charge, Tokenizer.trim(data, s + 70, s + 76));
+      } else {
+      }
+      if (length >= 78 && variant === "pdb") {
+        Tokenizer.trim(data, s + 76, s + 78);
+        if (data.tokenStart < data.tokenEnd) {
+          TokenBuilder.addToken(sites.type_symbol, data);
+        } else {
+          guessElementSymbolTokens(sites.type_symbol, str11, s + 12, s + 16);
+        }
       } else {
         guessElementSymbolTokens(sites.type_symbol, str11, s + 12, s + 16);
       }
-    } else {
-      guessElementSymbolTokens(sites.type_symbol, str11, s + 12, s + 16);
     }
     sites.pdbx_PDB_model_num[sites.index] = model;
     sites.index++;
   }
-  var LabelAsymIdHelper;
+  var LabelAsymIdHelper, UNALIGNED;
   var init_atom_site2 = __esm({
     "node_modules/molstar/lib/mol-model-formats/structure/pdb/atom-site.js"() {
       init_cif2();
@@ -70353,6 +77307,7 @@ void main(void) {
       init_util11();
       init_db();
       init_token();
+      init_alignment();
       LabelAsymIdHelper = class {
         constructor(asymIds, modelNums, terIndices, hasAssemblies) {
           this.asymIds = asymIds;
@@ -70393,6 +77348,7 @@ void main(void) {
           return this.currLabelAsymId;
         }
       };
+      UNALIGNED = -1;
     }
   });
 
@@ -70548,8 +77504,15 @@ void main(void) {
           continue;
         }
         bondIndex[idxB] = k - 1;
-        id.push(`covale${k}`);
-        conn_type_id.push("covale");
+        const atomIdA = sites.type_symbol.str(idxA);
+        const atomIdB = sites.type_symbol.str(idxB);
+        if (isMetal(atomIdA) || isMetal(atomIdB)) {
+          id.push(`metalc${k}`);
+          conn_type_id.push("metalc");
+        } else {
+          id.push(`covale${k}`);
+          conn_type_id.push("covale");
+        }
         bondOrder.push(1);
         ptnr1_label_asym_id.push(sites.label_asym_id.str(idxA));
         ptnr1_label_seq_id.push(sites.label_seq_id.int(idxA));
@@ -70591,6 +77554,7 @@ void main(void) {
   var init_conect = __esm({
     "node_modules/molstar/lib/mol-model-formats/structure/pdb/conect.js"() {
       init_cif2();
+      init_types2();
     }
   });
 
@@ -70618,10 +77582,9 @@ void main(void) {
     return true;
   }
   async function pdbToMmCif(pdb) {
-    const { lines } = pdb;
+    const { lines, variant } = pdb;
     const { data, indices: indices2 } = lines;
     const tokenizer = Tokenizer(data);
-    const isPdbqt = !!pdb.isPdbqt;
     let atomCount2 = 0;
     let anisotropicCount = 0;
     for (let i = 0, _i = lines.count; i < _i; i++) {
@@ -70648,6 +77611,7 @@ void main(void) {
     let modelNum = 0, modelStr = "";
     let conectRange = void 0;
     let hasAssemblies = false;
+    let seqresMap = void 0;
     const terIndices = /* @__PURE__ */ new Set();
     for (let i = 0, _i = lines.count; i < _i; i++) {
       let s = indices2[2 * i], e = indices2[2 * i + 1];
@@ -70658,7 +77622,7 @@ void main(void) {
               modelNum++;
               modelStr = "" + modelNum;
             }
-            addAtom(atomSite, modelStr, tokenizer, s, e, isPdbqt);
+            addAtom(atomSite, modelStr, tokenizer, s, e, variant);
           } else if (substringStartsWith(data, s, e, "ANISOU")) {
             addAnisotropic(anisotropic, modelStr, tokenizer, s, e);
           }
@@ -70704,7 +77668,7 @@ void main(void) {
               modelNum++;
               modelStr = "" + modelNum;
             }
-            addAtom(atomSite, modelStr, tokenizer, s, e, isPdbqt);
+            addAtom(atomSite, modelStr, tokenizer, s, e, variant);
           } else if (substringStartsWith(data, s, e, "HELIX")) {
             let j = i + 1;
             while (true) {
@@ -70776,6 +77740,24 @@ void main(void) {
             }
             helperCategories.push(parseSheet(lines, i, j));
             i = j - 1;
+          } else if (substringStartsWith(data, s, e, "SEQRES")) {
+            let j = i + 1;
+            while (true) {
+              s = indices2[2 * j];
+              e = indices2[2 * j + 1];
+              if (!substringStartsWith(data, s, e, "SEQRES"))
+                break;
+              j++;
+            }
+            if (seqresMap) {
+              if (isDebugMode) {
+                console.log("only single SEQRES block allowed, ignoring others");
+              }
+            } else {
+              seqresMap = parseSeqres(lines, i, j);
+              entityBuilder.setSeqres(seqresMap);
+            }
+            i = j - 1;
           }
           break;
         case "T":
@@ -70816,8 +77798,8 @@ void main(void) {
       const asymId = labelAsymIdHelper.get(i);
       atomSite.label_entity_id[i] = entityBuilder.getEntityId(compId2, moleculeType, asymId);
     }
-    const atom_site = getAtomSite(atomSite, labelAsymIdHelper, { hasAssemblies });
-    if (!isPdbqt)
+    const atom_site = getAtomSite(atomSite, labelAsymIdHelper, { hasAssemblies, seqresMap });
+    if (variant === "pdb")
       delete atom_site.partial_charge;
     if (conectRange) {
       helperCategories.push(parseConect(lines, conectRange[0], conectRange[1], atom_site));
@@ -70828,11 +77810,19 @@ void main(void) {
       atom_site: CifCategory.ofFields("atom_site", atom_site),
       atom_site_anisotrop: CifCategory.ofFields("atom_site_anisotrop", getAnisotropic(anisotropic))
     };
+    if (seqresMap) {
+      const entityPolySeq = getEntityPolySeq(seqresMap, (chainId) => entityBuilder.getEntityIdForChain(chainId));
+      if (entityPolySeq)
+        helperCategories.push(entityPolySeq);
+      const pdbxUnobsOrZeroOccResidues = getPdbxUnobsOrZeroOccResidues(seqresMap, (chainId) => entityBuilder.getEntityIdForChain(chainId), atom_site, modelNum);
+      if (pdbxUnobsOrZeroOccResidues)
+        helperCategories.push(pdbxUnobsOrZeroOccResidues);
+    }
     for (const c5 of helperCategories) {
       categories[c5.name] = c5;
     }
     return {
-      header: pdb.id || "PDB",
+      header: pdb.id || variant.toUpperCase(),
       categoryNames: Object.keys(categories),
       categories
     };
@@ -71032,5437 +78022,6 @@ void main(void) {
         }
         PsfFormat2.fromPsf = fromPsf;
       })(PsfFormat || (PsfFormat = {}));
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/script/mol-script/script-macro.js
-  function getPositionalArgs(args) {
-    return Object.keys(args).filter((k) => !isNaN(k)).map((k) => +k).sort((a5, b5) => a5 - b5).map((k) => args[k]);
-  }
-  function tryGetArg(args, name, defaultValue) {
-    return args && args[name] !== void 0 ? args[name] : defaultValue;
-  }
-  var init_script_macro = __esm({
-    "node_modules/molstar/lib/mol-script/script/mol-script/script-macro.js"() {
-      init_builder();
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/script/mol-script/symbols.js
-  function Alias(symbol2, ...aliases) {
-    return { kind: "alias", aliases, symbol: symbol2 };
-  }
-  function Macro(symbol2, translate, ...aliases) {
-    symbol2.info.namespace = "molscript-macro";
-    symbol2.id = `molscript-macro.${symbol2.info.name}`;
-    return { kind: "macro", symbol: symbol2, translate, aliases: [symbol2.info.name, ...aliases] };
-  }
-  function isMolScriptSymbol(x) {
-    return x.kind === "alias" || x.kind === "macro";
-  }
-  function makeList2(xs) {
-    for (const x of xs) {
-      if (isMolScriptSymbol(x))
-        list2.push(x);
-      else if (x instanceof Array)
-        makeList2(x);
-    }
-  }
-  function substSymbols(expr) {
-    if (Expression.isLiteral(expr)) {
-      return expr;
-    }
-    if (Expression.isSymbol(expr)) {
-      if (!SymbolMap3[expr.name])
-        return expr;
-      const s = SymbolMap3[expr.name];
-      if (s.kind === "alias")
-        return Expression.Symbol(SymbolMap3[expr.name].symbol.id);
-      throw s.translate([]);
-    }
-    const isMacro = Expression.isSymbol(expr.head) && !!SymbolMap3[expr.head.name] && SymbolMap3[expr.head.name].kind === "macro";
-    const head = isMacro ? expr.head : substSymbols(expr.head);
-    const headChanged = head !== expr.head;
-    if (!expr.args) {
-      if (isMacro)
-        return substSymbols(expr.head);
-      return headChanged ? Expression.Apply(head) : expr;
-    }
-    let argsChanged = false;
-    let newArgs;
-    if (Expression.isArgumentsArray(expr.args)) {
-      newArgs = [];
-      for (let i = 0, _i = expr.args.length; i < _i; i++) {
-        const oldArg = expr.args[i];
-        const newArg = substSymbols(oldArg);
-        if (oldArg !== newArg)
-          argsChanged = true;
-        newArgs[newArgs.length] = newArg;
-      }
-      if (!argsChanged)
-        newArgs = expr.args;
-      if (!isMacro && !headChanged && !argsChanged)
-        return expr;
-    } else {
-      newArgs = {};
-      for (const key2 of Object.keys(expr.args)) {
-        const oldArg = expr.args[key2];
-        const newArg = substSymbols(oldArg);
-        if (oldArg !== newArg)
-          argsChanged = true;
-        newArgs[key2] = newArg;
-      }
-      if (!isMacro && !headChanged && !argsChanged)
-        return expr;
-      if (!argsChanged)
-        newArgs = expr.args;
-    }
-    if (isMacro) {
-      const macro = SymbolMap3[expr.head.name];
-      if (macro.kind !== "macro")
-        return Expression.Apply(head, newArgs);
-      const ret = macro.translate(newArgs);
-      return ret;
-    }
-    return Expression.Apply(head, newArgs);
-  }
-  function transpileMolScript(expr) {
-    return substSymbols(expr);
-  }
-  var SymbolTable, list2, normalized, Constants2, NamedArgs, SymbolMap3, SymbolList3;
-  var init_symbols = __esm({
-    "node_modules/molstar/lib/mol-script/script/mol-script/symbols.js"() {
-      init_unique_array();
-      init_expression();
-      init_symbol();
-      init_symbol_table();
-      init_type();
-      init_structure_query();
-      init_builder();
-      init_script_macro();
-      SymbolTable = [
-        [
-          "Core symbols",
-          Alias(MolScriptSymbolTable.core.type.bool, "bool"),
-          Alias(MolScriptSymbolTable.core.type.num, "num"),
-          Alias(MolScriptSymbolTable.core.type.str, "str"),
-          Alias(MolScriptSymbolTable.core.type.regex, "regex"),
-          Alias(MolScriptSymbolTable.core.type.list, "list"),
-          Alias(MolScriptSymbolTable.core.type.set, "set"),
-          Alias(MolScriptSymbolTable.core.type.compositeKey, "composite-key"),
-          Alias(MolScriptSymbolTable.core.logic.not, "not"),
-          Alias(MolScriptSymbolTable.core.logic.and, "and"),
-          Alias(MolScriptSymbolTable.core.logic.or, "or"),
-          Alias(MolScriptSymbolTable.core.ctrl.if, "if"),
-          Alias(MolScriptSymbolTable.core.ctrl.fn, "fn"),
-          Alias(MolScriptSymbolTable.core.ctrl.eval, "eval"),
-          Alias(MolScriptSymbolTable.core.math.add, "add", "+"),
-          Alias(MolScriptSymbolTable.core.math.sub, "sub", "-"),
-          Alias(MolScriptSymbolTable.core.math.mult, "mult", "*"),
-          Alias(MolScriptSymbolTable.core.math.div, "div", "/"),
-          Alias(MolScriptSymbolTable.core.math.pow, "pow", "**"),
-          Alias(MolScriptSymbolTable.core.math.mod, "mod"),
-          Alias(MolScriptSymbolTable.core.math.min, "min"),
-          Alias(MolScriptSymbolTable.core.math.max, "max"),
-          Alias(MolScriptSymbolTable.core.math.cantorPairing, "cantor-pairing"),
-          Alias(MolScriptSymbolTable.core.math.sortedCantorPairing, "sorted-cantor-pairing"),
-          Alias(MolScriptSymbolTable.core.math.invertCantorPairing, "invert-cantor-pairing"),
-          Alias(MolScriptSymbolTable.core.math.floor, "floor"),
-          Alias(MolScriptSymbolTable.core.math.ceil, "ceil"),
-          Alias(MolScriptSymbolTable.core.math.roundInt, "round"),
-          Alias(MolScriptSymbolTable.core.math.trunc, "trunc"),
-          Alias(MolScriptSymbolTable.core.math.abs, "abs"),
-          Alias(MolScriptSymbolTable.core.math.sign, "sign"),
-          Alias(MolScriptSymbolTable.core.math.sqrt, "sqrt"),
-          Alias(MolScriptSymbolTable.core.math.cbrt, "cbrt"),
-          Alias(MolScriptSymbolTable.core.math.sin, "sin"),
-          Alias(MolScriptSymbolTable.core.math.cos, "cos"),
-          Alias(MolScriptSymbolTable.core.math.tan, "tan"),
-          Alias(MolScriptSymbolTable.core.math.asin, "asin"),
-          Alias(MolScriptSymbolTable.core.math.acos, "acos"),
-          Alias(MolScriptSymbolTable.core.math.atan, "atan"),
-          Alias(MolScriptSymbolTable.core.math.sinh, "sinh"),
-          Alias(MolScriptSymbolTable.core.math.cosh, "cosh"),
-          Alias(MolScriptSymbolTable.core.math.tanh, "tanh"),
-          Alias(MolScriptSymbolTable.core.math.exp, "exp"),
-          Alias(MolScriptSymbolTable.core.math.log, "log"),
-          Alias(MolScriptSymbolTable.core.math.log10, "log10"),
-          Alias(MolScriptSymbolTable.core.math.atan2, "atan2"),
-          Alias(MolScriptSymbolTable.core.rel.eq, "eq", "="),
-          Alias(MolScriptSymbolTable.core.rel.neq, "neq", "!="),
-          Alias(MolScriptSymbolTable.core.rel.lt, "lt", "<"),
-          Alias(MolScriptSymbolTable.core.rel.lte, "lte", "<="),
-          Alias(MolScriptSymbolTable.core.rel.gr, "gr", ">"),
-          Alias(MolScriptSymbolTable.core.rel.gre, "gre", ">="),
-          Alias(MolScriptSymbolTable.core.rel.inRange, "in-range"),
-          Alias(MolScriptSymbolTable.core.str.concat, "concat"),
-          Alias(MolScriptSymbolTable.core.str.match, "regex.match"),
-          Alias(MolScriptSymbolTable.core.list.getAt, "list.get"),
-          Alias(MolScriptSymbolTable.core.set.has, "set.has"),
-          Alias(MolScriptSymbolTable.core.set.isSubset, "set.subset")
-        ],
-        [
-          "Structure",
-          [
-            "Types",
-            Alias(MolScriptSymbolTable.structureQuery.type.entityType, "ent-type"),
-            Alias(MolScriptSymbolTable.structureQuery.type.authResidueId, "auth-resid"),
-            Alias(MolScriptSymbolTable.structureQuery.type.labelResidueId, "label-resid"),
-            Alias(MolScriptSymbolTable.structureQuery.type.ringFingerprint, "ringfp"),
-            Alias(MolScriptSymbolTable.structureQuery.type.bondFlags, "bond-flags")
-          ],
-          [
-            "Slots",
-            Alias(MolScriptSymbolTable.structureQuery.slot.elementSetReduce, "atom.set.reduce.value")
-          ],
-          [
-            "Generators",
-            Alias(MolScriptSymbolTable.structureQuery.generator.atomGroups, "sel.atom.atom-groups"),
-            Alias(MolScriptSymbolTable.structureQuery.generator.queryInSelection, "sel.atom.query-in-selection"),
-            Alias(MolScriptSymbolTable.structureQuery.generator.rings, "sel.atom.rings"),
-            Alias(MolScriptSymbolTable.structureQuery.generator.empty, "sel.atom.empty"),
-            Alias(MolScriptSymbolTable.structureQuery.generator.all, "sel.atom.all"),
-            Alias(MolScriptSymbolTable.structureQuery.generator.bondedAtomicPairs, "sel.atom.bonded-pairs"),
-            Macro(MSymbol("sel.atom.atoms", Arguments.Dictionary({
-              0: Argument(Type.Bool, { isOptional: true, defaultValue: true, description: "Test applied to each atom." })
-            }), Types2.ElementSelection, "A selection of singleton atom sets."), (args) => MolScriptBuilder.struct.generator.atomGroups({ "atom-test": tryGetArg(args, 0, true) })),
-            Macro(MSymbol("sel.atom.res", Arguments.Dictionary({
-              0: Argument(Type.Bool, { isOptional: true, defaultValue: true, description: "Test applied to the 1st atom of each residue." })
-            }), Types2.ElementSelection, "A selection of atom sets grouped by residue."), (args) => MolScriptBuilder.struct.generator.atomGroups({
-              "residue-test": tryGetArg(args, 0, true),
-              "group-by": MolScriptBuilder.ammp("residueKey")
-            })),
-            Macro(MSymbol("sel.atom.chains", Arguments.Dictionary({
-              0: Argument(Type.Bool, { isOptional: true, defaultValue: true, description: "Test applied to the 1st atom of each chain." })
-            }), Types2.ElementSelection, "A selection of atom sets grouped by chain."), (args) => MolScriptBuilder.struct.generator.atomGroups({
-              "chain-test": tryGetArg(args, 0, true),
-              "group-by": MolScriptBuilder.ammp("chainKey")
-            }))
-          ],
-          [
-            "Modifiers",
-            Alias(MolScriptSymbolTable.structureQuery.modifier.queryEach, "sel.atom.query-each"),
-            Alias(MolScriptSymbolTable.structureQuery.modifier.intersectBy, "sel.atom.intersect-by"),
-            Alias(MolScriptSymbolTable.structureQuery.modifier.exceptBy, "sel.atom.except-by"),
-            Alias(MolScriptSymbolTable.structureQuery.modifier.unionBy, "sel.atom.union-by"),
-            Alias(MolScriptSymbolTable.structureQuery.modifier.union, "sel.atom.union"),
-            Alias(MolScriptSymbolTable.structureQuery.modifier.cluster, "sel.atom.cluster"),
-            Alias(MolScriptSymbolTable.structureQuery.modifier.includeSurroundings, "sel.atom.include-surroundings"),
-            Alias(MolScriptSymbolTable.structureQuery.modifier.surroundingLigands, "sel.atom.surrounding-ligands"),
-            Alias(MolScriptSymbolTable.structureQuery.modifier.includeConnected, "sel.atom.include-connected"),
-            Alias(MolScriptSymbolTable.structureQuery.modifier.expandProperty, "sel.atom.expand-property")
-            // Macro(MSymbol('sel.atom.around', Arguments.Dictionary({
-            //     0: Argument(Type.Bool, { isOptional: true, defaultValue: true, description: 'Test applied to the 1st atom of each chain.' })
-            // }), Struct.Types.ElementSelection, 'A selection of singleton atom sets with centers within "radius" of the center of any atom in the given selection.'),
-            // args => B.struct.modifier.exceptBy({
-            //     '0': B.struct.filter.within({
-            //         '0': B.struct.generator.atomGroups(), target: M.tryGetArg(args, 0), 'max-radius': M.tryGetArg(args, 'radius')
-            //     }),
-            //     by: M.tryGetArg(args, 0)
-            // }))
-          ],
-          [
-            "Filters",
-            Alias(MolScriptSymbolTable.structureQuery.filter.pick, "sel.atom.pick"),
-            Alias(MolScriptSymbolTable.structureQuery.filter.first, "sel.atom.first"),
-            Alias(MolScriptSymbolTable.structureQuery.filter.withSameAtomProperties, "sel.atom.with-same-atom-properties"),
-            Alias(MolScriptSymbolTable.structureQuery.filter.intersectedBy, "sel.atom.intersected-by"),
-            Alias(MolScriptSymbolTable.structureQuery.filter.within, "sel.atom.within"),
-            Alias(MolScriptSymbolTable.structureQuery.filter.isConnectedTo, "sel.atom.is-connected-to")
-          ],
-          [
-            "Combinators",
-            Alias(MolScriptSymbolTable.structureQuery.combinator.intersect, "sel.atom.intersect"),
-            Alias(MolScriptSymbolTable.structureQuery.combinator.merge, "sel.atom.merge"),
-            Alias(MolScriptSymbolTable.structureQuery.combinator.distanceCluster, "sel.atom.dist-cluster")
-          ],
-          [
-            "Atom Set Properties",
-            Alias(MolScriptSymbolTable.structureQuery.atomSet.atomCount, "atom.set.atom-count"),
-            Alias(MolScriptSymbolTable.structureQuery.atomSet.countQuery, "atom.set.count-query"),
-            Alias(MolScriptSymbolTable.structureQuery.atomSet.reduce, "atom.set.reduce"),
-            Alias(MolScriptSymbolTable.structureQuery.atomSet.propertySet, "atom.set.property")
-            // Macro(MSymbol('atom.set.max', Arguments.Dictionary({
-            //     0: Argument(Type.Num, { description: 'Numeric atom property.'})
-            // }), Type.Num, 'Maximum of the given property in the current atom set.'),
-            // args => M.aggregate(M.tryGetArg(args, 0), B.core.math.max)),
-            // Macro(MSymbol('atom.set.sum', Arguments.Dictionary({
-            //     0: Argument(Type.Num, { description: 'Numeric atom property.'})
-            // }), Type.Num, 'Sum of the given property in the current atom set.'),
-            // args => M.aggregate(M.tryGetArg(args, 0), B.core.math.add, 0)),
-            // Macro(MSymbol('atom.set.avg', Arguments.Dictionary({
-            //     0: Argument(Type.Num, { description: 'Numeric atom property.'})
-            // }), Type.Num, 'Average of the given property in the current atom set.'),
-            // args => B.core.math.div([ M.aggregate(M.tryGetArg(args, 0), B.core.math.add, 0), B.struct.atomSet.atomCount() ])),
-            // Macro(MSymbol('atom.set.min', Arguments.Dictionary({
-            //     0: Argument(Type.Num, { description: 'Numeric atom property.'})
-            // }), Type.Num, 'Minimum of the given property in the current atom set.'),
-            // args => M.aggregate(M.tryGetArg(args, 0), B.core.math.min))
-          ],
-          [
-            "Atom Properties",
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.elementSymbol, "atom.el"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.vdw, "atom.vdw"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.mass, "atom.mass"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.atomicNumber, "atom.atomic-number"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.x, "atom.x"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.y, "atom.y"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.z, "atom.z"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.sourceIndex, "atom.src-index"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.operatorName, "atom.op-name"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.instanceId, "atom.instance-id"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.operatorKey, "atom.op-key"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.modelIndex, "atom.model-index"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.modelLabel, "atom.model-label"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.modelEntryId, "atom.model-entry-id"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.atomKey, "atom.key"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.core.bondCount, "atom.bond-count"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.topology.connectedComponentKey, "atom.key.molecule"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.authResidueId, "atom.auth-resid"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.labelResidueId, "atom.label-resid"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.residueKey, "atom.key.res"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.chainKey, "atom.key.chain"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityKey, "atom.key.entity"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.isHet, "atom.is-het"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.id, "atom.id"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_atom_id, "atom.label_atom_id"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_alt_id, "atom.label_alt_id", "atom.altloc"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_comp_id, "atom.label_comp_id"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_asym_id, "atom.label_asym_id"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_entity_id, "atom.label_entity_id"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_seq_id, "atom.label_seq_id"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_atom_id, "atom.auth_atom_id", "atom.name"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_comp_id, "atom.auth_comp_id", "atom.resname"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_asym_id, "atom.auth_asym_id", "atom.chain"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_seq_id, "atom.auth_seq_id", "atom.resno"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.pdbx_PDB_ins_code, "atom.pdbx_PDB_ins_code", "atom.inscode"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.pdbx_formal_charge, "atom.pdbx_formal_charge"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.occupancy, "atom.occupancy"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.B_iso_or_equiv, "atom.B_iso_or_equiv", "atom.bfactor"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityType, "atom.entity-type"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entitySubtype, "atom.entity-subtype"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityPrdId, "atom.entity-prd-id"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityDescription, "atom.entity-description"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.objectPrimitive, "atom.object-primitive"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.chemCompType, "atom.chem-comp-type"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.secondaryStructureKey, "atom.key.sec-struct"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.isModified, "atom.is-modified"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.modifiedParentName, "atom.modified-parent"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.ihm.hasSeqId, "atom.ihm.has-seq-id"),
-            Alias(MolScriptSymbolTable.structureQuery.atomProperty.ihm.overlapsSeqIdRange, "atom.ihm.overlaps-seq-id-range")
-            // Macro(MSymbol('atom.sec-struct.is', Arguments.List(Struct.Types.SecondaryStructureFlag), Type.Bool,
-            //     `Test if the current atom is part of an secondary structure. Optionally specify allowed sec. struct. types: ${Type.oneOfValues(Struct.Types.SecondaryStructureFlag).join(', ')}`),
-            // args => B.core.flags.hasAny([B.struct.atomProperty.macromolecular.secondaryStructureFlags(), B.struct.type.secondaryStructureFlags(args)])),
-          ],
-          [
-            "Bond Properties",
-            Alias(MolScriptSymbolTable.structureQuery.bondProperty.order, "bond.order"),
-            Alias(MolScriptSymbolTable.structureQuery.bondProperty.length, "bond.length"),
-            Alias(MolScriptSymbolTable.structureQuery.bondProperty.key, "bond.key"),
-            Alias(MolScriptSymbolTable.structureQuery.bondProperty.atomA, "bond.atom-a"),
-            Alias(MolScriptSymbolTable.structureQuery.bondProperty.atomB, "bond.atom-b"),
-            Macro(MSymbol("bond.is", Arguments.List(Types2.BondFlag), Type.Bool, `Test if the current bond has at least one (or all if partial = false) of the specified flags: ${Type.oneOfValues(Types2.BondFlag).join(", ")}`), (args) => MolScriptBuilder.core.flags.hasAny([MolScriptBuilder.struct.bondProperty.flags(), MolScriptBuilder.struct.type.bondFlags(getPositionalArgs(args))]))
-          ]
-        ]
-      ];
-      list2 = [];
-      makeList2(SymbolTable);
-      normalized = (function() {
-        const symbolList2 = [];
-        const symbolMap2 = /* @__PURE__ */ Object.create(null);
-        const namedArgs = UniqueArray.create();
-        const constants = UniqueArray.create();
-        for (const s of list2) {
-          for (const a5 of s.aliases) {
-            symbolList2.push([a5, s]);
-            if (symbolMap2[a5])
-              throw new Error(`Alias '${a5}' already in use.`);
-            symbolMap2[a5] = s;
-          }
-          const args = s.symbol.args;
-          if (args.kind !== "dictionary") {
-            if (args.type.kind === "oneof") {
-              Type.oneOfValues(args.type).forEach((v2) => UniqueArray.add(constants, v2, v2));
-            }
-            continue;
-          }
-          for (const a5 of Object.keys(args.map)) {
-            if (isNaN(a5))
-              UniqueArray.add(namedArgs, a5, a5);
-            const arg = args.map[a5];
-            if (arg.type.kind === "oneof") {
-              Type.oneOfValues(arg.type).forEach((v2) => UniqueArray.add(constants, v2, v2));
-            }
-          }
-        }
-        return { symbolList: symbolList2, symbolMap: symbolMap2, namedArgs: namedArgs.array, constants: constants.array };
-      })();
-      Constants2 = normalized.constants;
-      NamedArgs = normalized.namedArgs;
-      SymbolMap3 = normalized.symbolMap;
-      SymbolList3 = normalized.symbolList;
-    }
-  });
-
-  // node_modules/molstar/lib/mol-util/monadic-parser.js
-  function seqPick(idx, ...parsers) {
-    const numParsers = parsers.length;
-    return new MonadicParser((input, index) => {
-      let result2;
-      let picked;
-      let i = index;
-      for (let j = 0; j < numParsers; j++) {
-        result2 = mergeReplies(parsers[j]._(input, i), result2);
-        if (!result2.status) {
-          return result2;
-        }
-        if (idx === j)
-          picked = result2.value;
-        i = result2.index;
-      }
-      return mergeReplies(makeSuccess(i, picked), result2);
-    });
-  }
-  function makeSuccess(index, value) {
-    return { status: true, index, value };
-  }
-  function makeFailure(index, expected) {
-    return { status: false, furthest: index, expected: [expected] };
-  }
-  function mergeReplies(result2, last3) {
-    if (!last3 || result2.status || last3.status || result2.furthest > last3.furthest) {
-      return result2;
-    }
-    const expected = result2.furthest === last3.furthest ? unsafeUnion(result2.expected, last3.expected) : last3.expected;
-    return { status: result2.status, furthest: last3.furthest, expected };
-  }
-  function makeLineColumnIndex(input, i) {
-    const lines = input.slice(0, i).split("\n");
-    const lineWeAreUpTo = lines.length;
-    const columnWeAreUpTo = lines[lines.length - 1].length + 1;
-    return { offset: i, line: lineWeAreUpTo, column: columnWeAreUpTo };
-  }
-  function formatExpected(expected) {
-    if (expected.length === 1) {
-      return expected[0];
-    }
-    return "one of " + expected.join(", ");
-  }
-  function formatGot(input, error2) {
-    const index = error2.index;
-    const i = index.offset;
-    if (i === input.length) {
-      return ", got the end of the input";
-    }
-    const prefix2 = i > 0 ? "'..." : "'";
-    const suffix = input.length - i > 12 ? "...'" : "'";
-    return ` at line ${index.line} column ${index.column}, got ${prefix2}${input.slice(i, i + 12)}${suffix}`;
-  }
-  function formatError(input, error2) {
-    return `expected ${formatExpected(error2.expected)}${formatGot(input, error2)}`;
-  }
-  function unsafeUnion(xs, ys) {
-    const xn = xs.length;
-    const yn = ys.length;
-    if (xn === 0)
-      return ys;
-    else if (yn === 0)
-      return xs;
-    const set4 = /* @__PURE__ */ new Set();
-    const ret = [];
-    for (let i = 0; i < xn; i++) {
-      if (!set4.has(xs[i])) {
-        ret[ret.length] = xs[i];
-        set4.add(xs[i]);
-      }
-    }
-    for (let i = 0; i < yn; i++) {
-      if (!set4.has(ys[i])) {
-        ret[ret.length] = ys[i];
-        set4.add(ys[i]);
-      }
-    }
-    ret.sort();
-    return ret;
-  }
-  function isParser(obj) {
-    return obj instanceof MonadicParser;
-  }
-  function assertFunction(x) {
-    if (typeof x !== "function") {
-      throw new Error("not a function: " + x);
-    }
-  }
-  var MonadicParser;
-  var init_monadic_parser = __esm({
-    "node_modules/molstar/lib/mol-util/monadic-parser.js"() {
-      MonadicParser = class _MonadicParser {
-        constructor(_) {
-          this._ = _;
-        }
-        parse(input) {
-          const result2 = this.skip(_MonadicParser.eof)._(input, 0);
-          if (result2.status) {
-            return { success: true, value: result2.value };
-          }
-          return { success: false, index: makeLineColumnIndex(input, result2.furthest), expected: result2.expected };
-        }
-        tryParse(str11) {
-          const result2 = this.parse(str11);
-          if (result2.success) {
-            return result2.value;
-          } else {
-            const msg = formatError(str11, result2);
-            const err = new Error(msg);
-            throw err;
-          }
-        }
-        or(alternative) {
-          return _MonadicParser.alt(this, alternative);
-        }
-        trim(parser) {
-          return this.wrap(parser, parser);
-        }
-        wrap(leftParser, rightParser) {
-          return seqPick(1, typeof leftParser === "string" ? _MonadicParser.string(leftParser) : leftParser, this, typeof rightParser === "string" ? _MonadicParser.string(rightParser) : rightParser);
-        }
-        thru(wrapper) {
-          return wrapper(this);
-        }
-        then(next) {
-          return seqPick(1, this, next);
-        }
-        many() {
-          return new _MonadicParser((input, i) => {
-            const accum = [];
-            let result2 = void 0;
-            while (true) {
-              result2 = mergeReplies(this._(input, i), result2);
-              if (result2.status) {
-                if (i === result2.index) {
-                  throw new Error("infinite loop detected in .many() parser --- calling .many() on a parser which can accept zero characters is usually the cause");
-                }
-                i = result2.index;
-                accum.push(result2.value);
-              } else {
-                return mergeReplies(makeSuccess(i, accum), result2);
-              }
-            }
-          });
-        }
-        times(min5, _max) {
-          const max5 = typeof _max === "undefined" ? min5 : _max;
-          return new _MonadicParser((input, i) => {
-            const accum = [];
-            let result2 = void 0;
-            let prevResult = void 0;
-            let times;
-            for (times = 0; times < min5; times++) {
-              result2 = this._(input, i);
-              prevResult = mergeReplies(result2, prevResult);
-              if (result2.status) {
-                i = result2.index;
-                accum.push(result2.value);
-              } else {
-                return prevResult;
-              }
-            }
-            for (; times < max5; times += 1) {
-              result2 = this._(input, i);
-              prevResult = mergeReplies(result2, prevResult);
-              if (result2.status) {
-                i = result2.index;
-                accum.push(result2.value);
-              } else {
-                break;
-              }
-            }
-            return mergeReplies(makeSuccess(i, accum), prevResult);
-          });
-        }
-        result(res) {
-          return this.map(() => res);
-        }
-        atMost(n) {
-          return this.times(0, n);
-        }
-        atLeast(n) {
-          return _MonadicParser.seq(this.times(n), this.many()).map((r) => [...r[0], ...r[1]]);
-        }
-        map(f) {
-          return new _MonadicParser((input, i) => {
-            const result2 = this._(input, i);
-            if (!result2.status) {
-              return result2;
-            }
-            return mergeReplies(makeSuccess(result2.index, f(result2.value)), result2);
-          });
-        }
-        skip(next) {
-          return seqPick(0, this, next);
-        }
-        mark() {
-          return _MonadicParser.seq(_MonadicParser.index, this, _MonadicParser.index).map((r) => ({ start: r[0], value: r[1], end: r[2] }));
-        }
-        node(name) {
-          return _MonadicParser.seq(_MonadicParser.index, this, _MonadicParser.index).map((r) => ({ name, start: r[0], value: r[1], end: r[2] }));
-        }
-        sepBy(separator) {
-          return _MonadicParser.sepBy(this, separator);
-        }
-        sepBy1(separator) {
-          return _MonadicParser.sepBy1(this, separator);
-        }
-        lookahead(x) {
-          return this.skip(_MonadicParser.lookahead(x));
-        }
-        notFollowedBy(x) {
-          return this.skip(_MonadicParser.notFollowedBy(x));
-        }
-        desc(expected) {
-          return new _MonadicParser((input, i) => {
-            const reply = this._(input, i);
-            if (!reply.status) {
-              reply.expected = [expected];
-            }
-            return reply;
-          });
-        }
-        fallback(result2) {
-          return this.or(_MonadicParser.succeed(result2));
-        }
-        ap(other) {
-          return _MonadicParser.seq(other, this).map(([f, x]) => f(x));
-        }
-        chain(f) {
-          return new _MonadicParser((input, i) => {
-            const result2 = this._(input, i);
-            if (!result2.status) {
-              return result2;
-            }
-            const nextParser = f(result2.value);
-            return mergeReplies(nextParser._(input, result2.index), result2);
-          });
-        }
-      };
-      (function(MonadicParser2) {
-        function seqMap(a5, b5, c5) {
-          const args = [].slice.call(arguments);
-          if (args.length === 0) {
-            throw new Error("seqMap needs at least one argument");
-          }
-          const mapper = args.pop();
-          assertFunction(mapper);
-          return seq.apply(null, args).map(function(results) {
-            return mapper.apply(null, results);
-          });
-        }
-        MonadicParser2.seqMap = seqMap;
-        function createLanguage(parsers) {
-          const language = {};
-          for (const key2 of Object.keys(parsers)) {
-            (function(key3) {
-              language[key3] = lazy(() => parsers[key3](language));
-            })(key2);
-          }
-          return language;
-        }
-        MonadicParser2.createLanguage = createLanguage;
-        function seq(...parsers) {
-          const numParsers = parsers.length;
-          return new MonadicParser2((input, index) => {
-            let result2;
-            const accum = new Array(numParsers);
-            let i = index;
-            for (let j = 0; j < numParsers; j++) {
-              result2 = mergeReplies(parsers[j]._(input, i), result2);
-              if (!result2.status) {
-                return result2;
-              }
-              accum[j] = result2.value;
-              i = result2.index;
-            }
-            return mergeReplies(makeSuccess(i, accum), result2);
-          });
-        }
-        MonadicParser2.seq = seq;
-        function alt(...parsers) {
-          const numParsers = parsers.length;
-          if (numParsers === 0) {
-            return fail("zero alternates");
-          }
-          return new MonadicParser2((input, i) => {
-            let result2;
-            for (let j = 0; j < parsers.length; j++) {
-              result2 = mergeReplies(parsers[j]._(input, i), result2);
-              if (result2.status) {
-                return result2;
-              }
-            }
-            return result2;
-          });
-        }
-        MonadicParser2.alt = alt;
-        function sepBy(parser, separator) {
-          return sepBy1(parser, separator).or(succeed([]));
-        }
-        MonadicParser2.sepBy = sepBy;
-        function sepBy1(parser, separator) {
-          const pairs = separator.then(parser).many();
-          return seq(parser, pairs).map((r) => [r[0], ...r[1]]);
-        }
-        MonadicParser2.sepBy1 = sepBy1;
-        function string(str11) {
-          const expected = `'${str11}'`;
-          if (str11.length === 1) {
-            const code = str11.charCodeAt(0);
-            return new MonadicParser2((input, i) => input.charCodeAt(i) === code ? makeSuccess(i + 1, str11) : makeFailure(i, expected));
-          }
-          return new MonadicParser2((input, i) => {
-            const j = i + str11.length;
-            if (input.slice(i, j) === str11)
-              return makeSuccess(j, str11);
-            else
-              return makeFailure(i, expected);
-          });
-        }
-        MonadicParser2.string = string;
-        function flags2(re) {
-          const s = "" + re;
-          return s.slice(s.lastIndexOf("/") + 1);
-        }
-        function anchoredRegexp(re) {
-          return RegExp("^(?:" + re.source + ")", flags2(re));
-        }
-        function regexp(re, group = 0) {
-          const anchored = anchoredRegexp(re);
-          const expected = "" + re;
-          return new MonadicParser2((input, i) => {
-            const match = anchored.exec(input.slice(i));
-            if (match) {
-              if (0 <= group && group <= match.length) {
-                const fullMatch = match[0];
-                const groupMatch = match[group];
-                return makeSuccess(i + fullMatch.length, groupMatch);
-              }
-              const message = `invalid match group (0 to ${match.length}) in ${expected}`;
-              return makeFailure(i, message);
-            }
-            return makeFailure(i, expected);
-          });
-        }
-        MonadicParser2.regexp = regexp;
-        function succeed(value) {
-          return new MonadicParser2((input, i) => makeSuccess(i, value));
-        }
-        MonadicParser2.succeed = succeed;
-        function fail(expected) {
-          return new MonadicParser2((input, i) => makeFailure(i, expected));
-        }
-        MonadicParser2.fail = fail;
-        function lookahead(x) {
-          if (isParser(x)) {
-            return new MonadicParser2((input, i) => {
-              const result2 = x._(input, i);
-              if (result2.status) {
-                result2.index = i;
-                result2.value = null;
-              }
-              return result2;
-            });
-          } else if (typeof x === "string") {
-            return lookahead(string(x));
-          } else if (x instanceof RegExp) {
-            return lookahead(regexp(x));
-          }
-          throw new Error("not a string, regexp, or parser: " + x);
-        }
-        MonadicParser2.lookahead = lookahead;
-        function notFollowedBy(parser) {
-          return new MonadicParser2((input, i) => {
-            const result2 = parser._(input, i);
-            return result2.status ? makeFailure(i, 'not "' + input.slice(i, result2.index) + '"') : makeSuccess(i, null);
-          });
-        }
-        MonadicParser2.notFollowedBy = notFollowedBy;
-        function test(predicate) {
-          return new MonadicParser2((input, i) => {
-            const char = input.charAt(i);
-            if (i < input.length && predicate(char)) {
-              return makeSuccess(i + 1, char);
-            } else {
-              return makeFailure(i, "a character " + predicate);
-            }
-          });
-        }
-        MonadicParser2.test = test;
-        function oneOf(str11) {
-          return test((ch) => str11.indexOf(ch) >= 0);
-        }
-        MonadicParser2.oneOf = oneOf;
-        function noneOf(str11) {
-          return test((ch) => str11.indexOf(ch) < 0);
-        }
-        MonadicParser2.noneOf = noneOf;
-        function range2(begin, end4) {
-          return test((ch) => begin <= ch && ch <= end4).desc(begin + "-" + end4);
-        }
-        MonadicParser2.range = range2;
-        function takeWhile2(predicate) {
-          return new MonadicParser2((input, i) => {
-            let j = i;
-            while (j < input.length && predicate(input.charAt(j))) {
-              j++;
-            }
-            return makeSuccess(j, input.slice(i, j));
-          });
-        }
-        MonadicParser2.takeWhile = takeWhile2;
-        function lazy(f) {
-          const parser = new MonadicParser2((input, i) => {
-            const a5 = f()._;
-            parser._ = a5;
-            return a5(input, i);
-          });
-          return parser;
-        }
-        MonadicParser2.lazy = lazy;
-        function empty() {
-          return fail("empty");
-        }
-        MonadicParser2.empty = empty;
-        MonadicParser2.index = new MonadicParser2(function(input, i) {
-          return makeSuccess(i, makeLineColumnIndex(input, i));
-        });
-        MonadicParser2.anyChar = new MonadicParser2((input, i) => {
-          if (i >= input.length) {
-            return makeFailure(i, "any character");
-          }
-          return makeSuccess(i + 1, input.charAt(i));
-        });
-        MonadicParser2.all = new MonadicParser2(function(input, i) {
-          return makeSuccess(input.length, input.slice(i));
-        });
-        MonadicParser2.eof = new MonadicParser2(function(input, i) {
-          if (i < input.length) {
-            return makeFailure(i, "EOF");
-          }
-          return makeSuccess(i, null);
-        });
-        MonadicParser2.digit = regexp(/[0-9]/).desc("a digit");
-        MonadicParser2.digits = regexp(/[0-9]*/).desc("optional digits");
-        MonadicParser2.letter = regexp(/[a-z]/i).desc("a letter");
-        MonadicParser2.letters = regexp(/[a-z]*/i).desc("optional letters");
-        MonadicParser2.optWhitespace = regexp(/\s*/).desc("optional whitespace");
-        MonadicParser2.whitespace = regexp(/\s+/).desc("whitespace");
-        MonadicParser2.cr = string("\r");
-        MonadicParser2.lf = string("\n");
-        MonadicParser2.crlf = string("\r\n");
-        MonadicParser2.newline = alt(MonadicParser2.crlf, MonadicParser2.lf, MonadicParser2.cr).desc("newline");
-        MonadicParser2.end = alt(MonadicParser2.newline, MonadicParser2.eof);
-        function of(value) {
-          return succeed(value);
-        }
-        MonadicParser2.of = of;
-        function regex(re) {
-          return regexp(re);
-        }
-        MonadicParser2.regex = regex;
-      })(MonadicParser || (MonadicParser = {}));
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/language/parser.js
-  function parseMolScript(input) {
-    return Language.parse(input);
-  }
-  var Language;
-  var init_parser15 = __esm({
-    "node_modules/molstar/lib/mol-script/language/parser.js"() {
-      init_monadic_parser();
-      init_expression();
-      init_builder();
-      init_type_helpers();
-      (function(Language2) {
-        let ASTNode;
-        (function(ASTNode2) {
-          function str11(value) {
-            return { kind: "string", value };
-          }
-          ASTNode2.str = str11;
-          function symb(value) {
-            return { kind: "symbol", value };
-          }
-          ASTNode2.symb = symb;
-          function list3(bracket, nodes) {
-            return { kind: "list", bracket, nodes };
-          }
-          ASTNode2.list = list3;
-          function comment(value) {
-            return { kind: "comment", value };
-          }
-          ASTNode2.comment = comment;
-        })(ASTNode || (ASTNode = {}));
-        const ws = MonadicParser.regexp(/[\n\r\s]*/);
-        const Expr = MonadicParser.lazy(() => MonadicParser.alt(Str, List4, Symb, Comment).trim(ws));
-        const Str = MonadicParser.takeWhile((c5) => c5 !== "`").trim("`").map(ASTNode.str);
-        const Symb = MonadicParser.regexp(/[^()\[\]{};`,\n\r\s]+/).map(ASTNode.symb);
-        const Comment = MonadicParser.regexp(/\s*;+([^\n\r]*)\n/, 1).map(ASTNode.comment);
-        const Args = Expr.many();
-        const List1 = Args.wrap("(", ")").map((args) => ASTNode.list("(", args));
-        const List22 = Args.wrap("[", "]").map((args) => ASTNode.list("[", args));
-        const List32 = Args.wrap("{", "}").map((args) => ASTNode.list("{", args));
-        const List4 = MonadicParser.alt(List1, List22, List32);
-        const Expressions = Expr.many();
-        function getAST(input) {
-          return Expressions.tryParse(input);
-        }
-        function visitExpr(expr) {
-          switch (expr.kind) {
-            case "string":
-              return expr.value;
-            case "symbol": {
-              const value = expr.value;
-              if (value.length > 1) {
-                const fst = value.charAt(0);
-                switch (fst) {
-                  case ".":
-                    return MolScriptBuilder.atomName(value.substr(1));
-                  case "_":
-                    return MolScriptBuilder.struct.type.elementSymbol([value.substr(1)]);
-                }
-              }
-              if (value === "true")
-                return true;
-              if (value === "false")
-                return false;
-              if (isNumber(value))
-                return +value;
-              return Expression.Symbol(value);
-            }
-            case "list": {
-              switch (expr.bracket) {
-                case "[":
-                  return MolScriptBuilder.core.type.list(withoutComments(expr.nodes).map(visitExpr));
-                case "{":
-                  return MolScriptBuilder.core.type.set(withoutComments(expr.nodes).map(visitExpr));
-                case "(": {
-                  if (expr.nodes[0].kind === "comment")
-                    throw new Error("Invalid expression");
-                  const head = visitExpr(expr.nodes[0]);
-                  return Expression.Apply(head, getArgs(expr.nodes));
-                }
-                default:
-                  assertUnreachable(expr.bracket);
-              }
-            }
-            default:
-              assertUnreachable(expr);
-          }
-        }
-        function getArgs(nodes) {
-          if (nodes.length <= 1)
-            return void 0;
-          if (!hasNamedArgs(nodes)) {
-            const args2 = [];
-            for (let i = 1, _i = nodes.length; i < _i; i++) {
-              const n = nodes[i];
-              if (n.kind === "comment")
-                continue;
-              args2[args2.length] = visitExpr(n);
-            }
-            return args2;
-          }
-          const args = {};
-          let allNumeric = true;
-          let pos = 0;
-          for (let i = 1, _i = nodes.length; i < _i; i++) {
-            const n = nodes[i];
-            if (n.kind === "comment")
-              continue;
-            if (n.kind === "symbol" && n.value.length > 1 && n.value.charAt(0) === ":") {
-              const name = n.value.substr(1);
-              ++i;
-              while (i < _i && nodes[i].kind === "comment") {
-                i++;
-              }
-              if (i >= _i)
-                throw new Error(`There must be a value foolowed a named arg ':${name}'.`);
-              if (nodes[i].kind === "comment")
-                throw new Error("Invalid expression");
-              args[name] = visitExpr(nodes[i]);
-              if (isNaN(+name))
-                allNumeric = false;
-            } else {
-              args[pos++] = visitExpr(n);
-            }
-          }
-          if (allNumeric) {
-            const keys2 = Object.keys(args).map((a5) => +a5).sort((a5, b5) => a5 - b5);
-            let isArray = true;
-            for (let i = 0, _i = keys2.length; i < _i; i++) {
-              if (keys2[i] !== i) {
-                isArray = false;
-                break;
-              }
-            }
-            if (isArray) {
-              const arrayArgs = [];
-              for (let i = 0, _i = keys2.length; i < _i; i++) {
-                arrayArgs[i] = args[i];
-              }
-              return arrayArgs;
-            }
-          }
-          return args;
-        }
-        function hasNamedArgs(nodes) {
-          for (let i = 1, _i = nodes.length; i < _i; i++) {
-            const n = nodes[i];
-            if (n.kind === "symbol" && n.value.length > 1 && n.value.charAt(0) === ":")
-              return true;
-          }
-          return false;
-        }
-        function withoutComments(nodes) {
-          let hasComment = false;
-          for (let i = 0, _i = nodes.length; i < _i; i++) {
-            if (nodes[i].kind === "comment") {
-              hasComment = true;
-              break;
-            }
-          }
-          if (!hasComment)
-            return nodes;
-          return nodes.filter((n) => n.kind !== "comment");
-        }
-        function isNumber(value) {
-          return /-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?/.test(value) && !isNaN(+value);
-        }
-        function parse5(input) {
-          const ast = getAST(input);
-          const ret = [];
-          for (const expr of ast) {
-            if (expr.kind === "comment")
-              continue;
-            ret[ret.length] = visitExpr(expr);
-          }
-          return ret;
-        }
-        Language2.parse = parse5;
-      })(Language || (Language = {}));
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/helper.js
-  function prefix(opParser, nextParser, mapFn) {
-    const parser = MonadicParser.lazy(() => {
-      return MonadicParser.seq(opParser, parser).map((x) => mapFn(...x)).or(nextParser);
-    });
-    return parser;
-  }
-  function postfix(opParser, nextParser, mapFn) {
-    return MonadicParser.seqMap(nextParser, opParser.many(), (x, suffixes) => suffixes.reduce((acc, x2) => {
-      return mapFn(x2, acc);
-    }, x));
-  }
-  function binaryLeft(opParser, nextParser, mapFn) {
-    return MonadicParser.seqMap(nextParser, MonadicParser.seq(opParser, nextParser).many(), (first4, rest2) => {
-      return rest2.reduce((acc, ch) => {
-        const [op2, another] = ch;
-        return mapFn(op2, acc, another);
-      }, first4);
-    });
-  }
-  function combineOperators(opList, rule) {
-    const x = opList.reduce((acc, level) => {
-      const map3 = level.isUnsupported ? makeError(`operator '${level.name}' not supported`) : level.map;
-      return level.type(level.rule, acc, map3);
-    }, rule);
-    return x;
-  }
-  function infixOp(re, group = 0) {
-    return MonadicParser.optWhitespace.then(MonadicParser.regexp(re, group).skip(MonadicParser.optWhitespace));
-  }
-  function prefixOp(re, group = 0) {
-    return MonadicParser.regexp(re, group).skip(MonadicParser.optWhitespace);
-  }
-  function postfixOp(re, group = 0) {
-    return MonadicParser.optWhitespace.then(MonadicParser.regexp(re, group));
-  }
-  function ofOp(name, short) {
-    const op2 = short ? `${name}|${escapeRegExp(short)}` : name;
-    const re = RegExp(`(${op2})\\s+([-+]?[0-9]*\\.?[0-9]+)\\s+OF`, "i");
-    return infixOp(re, 2).map(parseFloat);
-  }
-  function makeError(msg) {
-    return function() {
-      throw new Error(msg);
-    };
-  }
-  function andExpr(selections) {
-    if (selections.length === 1) {
-      return selections[0];
-    } else if (selections.length > 1) {
-      return B.core.logic.and(selections);
-    } else {
-      return void 0;
-    }
-  }
-  function orExpr(selections) {
-    if (selections.length === 1) {
-      return selections[0];
-    } else if (selections.length > 1) {
-      return B.core.logic.or(selections);
-    } else {
-      return void 0;
-    }
-  }
-  function testExpr(property2, args) {
-    if (args && args.op !== void 0 && args.val !== void 0) {
-      const opArgs = [property2, args.val];
-      switch (args.op) {
-        case "=":
-          return B.core.rel.eq(opArgs);
-        case "!=":
-          return B.core.rel.neq(opArgs);
-        case ">":
-          return B.core.rel.gr(opArgs);
-        case "<":
-          return B.core.rel.lt(opArgs);
-        case ">=":
-          return B.core.rel.gre(opArgs);
-        case "<=":
-          return B.core.rel.lte(opArgs);
-        default:
-          throw new Error(`operator '${args.op}' not supported`);
-      }
-    } else if (args && args.flags !== void 0) {
-      return B.core.flags.hasAny([property2, args.flags]);
-    } else if (args && args.min !== void 0 && args.max !== void 0) {
-      return B.core.rel.inRange([property2, args.min, args.max]);
-    } else if (!Array.isArray(args)) {
-      return B.core.rel.eq([property2, args]);
-    } else if (args.length > 1) {
-      return B.core.set.has([B.core.type.set(args), property2]);
-    } else {
-      return B.core.rel.eq([property2, args[0]]);
-    }
-  }
-  function invertExpr(selection) {
-    return B.struct.generator.queryInSelection({
-      0: selection,
-      query: B.struct.generator.all(),
-      "in-complement": true
-    });
-  }
-  function strLenSortFn(a5, b5) {
-    return a5.length < b5.length ? 1 : -1;
-  }
-  function getNamesRegex(name, abbr) {
-    const names = (abbr ? [name].concat(abbr) : [name]).sort(strLenSortFn).map(escapeRegExp).join("|");
-    return RegExp(`${names}`, "i");
-  }
-  function getPropertyRules(properties4) {
-    const propertiesDict2 = {};
-    Object.keys(properties4).sort(strLenSortFn).forEach((name) => {
-      const ps = properties4[name];
-      const errorFn = makeError(`property '${name}' not supported`);
-      const rule = MonadicParser.regexp(ps.regex).map((x) => {
-        if (ps.isUnsupported)
-          errorFn();
-        return testExpr(ps.property, ps.map(x));
-      });
-      if (!ps.isNumeric) {
-        propertiesDict2[name] = rule;
-      }
-    });
-    return propertiesDict2;
-  }
-  function getNamedPropertyRules(properties4) {
-    const namedPropertiesList = [];
-    Object.keys(properties4).sort(strLenSortFn).forEach((name) => {
-      const ps = properties4[name];
-      const errorFn = makeError(`property '${name}' not supported`);
-      const rule = MonadicParser.regexp(ps.regex).map((x) => {
-        if (ps.isUnsupported)
-          errorFn();
-        return testExpr(ps.property, ps.map(x));
-      });
-      const nameRule = MonadicParser.regexp(getNamesRegex(name, ps.abbr)).trim(MonadicParser.optWhitespace);
-      const groupMap = (x) => B.struct.generator.atomGroups({ [ps.level]: x });
-      if (ps.isNumeric) {
-        namedPropertiesList.push(nameRule.then(MonadicParser.seq(MonadicParser.regexp(/>=|<=|=|!=|>|</).trim(MonadicParser.optWhitespace), MonadicParser.regexp(ps.regex).map(ps.map))).map((x) => {
-          if (ps.isUnsupported)
-            errorFn();
-          return testExpr(ps.property, { op: x[0], val: x[1] });
-        }).map(groupMap));
-      } else {
-        namedPropertiesList.push(nameRule.then(rule).map(groupMap));
-      }
-    });
-    return namedPropertiesList;
-  }
-  function getKeywordRules(keywords4) {
-    const keywordsList = [];
-    Object.keys(keywords4).sort(strLenSortFn).forEach((name) => {
-      const ks = keywords4[name];
-      const mapFn = ks.map ? ks.map : makeError(`keyword '${name}' not supported`);
-      const rule = MonadicParser.regexp(getNamesRegex(name, ks.abbr)).map(mapFn);
-      keywordsList.push(rule);
-    });
-    return keywordsList;
-  }
-  function getFunctionRules(functions2, argRule) {
-    const functionsList = [];
-    const begRule = MonadicParser.regexp(/\(\s*/);
-    const endRule = MonadicParser.regexp(/\s*\)/);
-    Object.keys(functions2).sort(strLenSortFn).forEach((name) => {
-      const fs = functions2[name];
-      const mapFn = fs.map ? fs.map : makeError(`function '${name}' not supported`);
-      const rule = MonadicParser.regexp(new RegExp(name, "i")).skip(begRule).then(argRule).skip(endRule).map(mapFn);
-      functionsList.push(rule);
-    });
-    return functionsList;
-  }
-  function getPropertyNameRules(properties4, lookahead) {
-    const list3 = [];
-    Object.keys(properties4).sort(strLenSortFn).forEach((name) => {
-      const ps = properties4[name];
-      const errorFn = makeError(`property '${name}' not supported`);
-      const rule = MonadicParser.regexp(getNamesRegex(name, ps.abbr)).lookahead(lookahead).map(() => {
-        if (ps.isUnsupported)
-          errorFn();
-        return ps.property;
-      });
-      list3.push(rule);
-    });
-    return list3;
-  }
-  function getReservedWords(properties4, keywords4, operators4, functions2) {
-    const w = [];
-    for (const name in properties4) {
-      w.push(name);
-      if (properties4[name].abbr)
-        w.push(...properties4[name].abbr);
-    }
-    for (const name in keywords4) {
-      w.push(name);
-      if (keywords4[name].abbr)
-        w.push(...keywords4[name].abbr);
-    }
-    operators4.forEach((o) => {
-      w.push(o.name);
-      if (o.abbr)
-        w.push(...o.abbr);
-    });
-    return w;
-  }
-  function atomNameSet(ids) {
-    return B.core.type.set(ids.map(B.atomName));
-  }
-  function asAtoms(e) {
-    return B.struct.generator.queryInSelection({
-      0: e,
-      query: B.struct.generator.all()
-    });
-  }
-  function wrapValue(property2, value, sstrucDict3) {
-    switch (property2.head.name) {
-      case "structure-query.atom-property.macromolecular.label_atom_id":
-        return B.atomName(value);
-      case "structure-query.atom-property.core.element-symbol":
-        return B.es(value);
-      case "structure-query.atom-property.macromolecular.secondary-structure-flags":
-        if (sstrucDict3) {
-          value = [sstrucDict3[value.toUpperCase()] || "none"];
-        }
-        return B.struct.type.secondaryStructureFlags([value]);
-      default:
-        return value;
-    }
-  }
-  function testLevel(property2) {
-    if (property2.head.name.startsWith(propPrefix)) {
-      const name = property2.head.name.substr(propPrefix.length);
-      if (entityProps.includes(name))
-        return "entity-test";
-      if (chainProps.includes(name))
-        return "chain-test";
-      if (residueProps.includes(name))
-        return "residue-test";
-    }
-    return "atom-test";
-  }
-  function valuesTest(property2, values2) {
-    if (flagProps.includes(property2.head.name)) {
-      const name = values2[0].head;
-      const flags2 = [];
-      values2.forEach((v2) => flags2.push(...v2.args[0]));
-      return B.core.flags.hasAny([property2, { head: name, args: flags2 }]);
-    } else {
-      if (values2.length === 1) {
-        return B.core.rel.eq([property2, values2[0]]);
-      } else if (values2.length > 1) {
-        return B.core.set.has([B.core.type.set(values2), property2]);
-      }
-    }
-  }
-  function resnameExpr(resnameList) {
-    return B.struct.generator.atomGroups({
-      "residue-test": B.core.set.has([
-        B.core.type.set(resnameList),
-        B.ammp("label_comp_id")
-      ])
-    });
-  }
-  var B, propPrefix, entityProps, chainProps, residueProps, flagProps;
-  var init_helper = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/helper.js"() {
-      init_monadic_parser();
-      init_builder();
-      init_string();
-      B = MolScriptBuilder;
-      propPrefix = "structure-query.atom-property.macromolecular.";
-      entityProps = ["entityKey", "label_entity_id", "entityType"];
-      chainProps = ["chainKey", "label_asym_id", "label_entity_id", "auth_asym_id", "entityType"];
-      residueProps = ["residueKey", "label_comp_id", "label_seq_id", "auth_comp_id", "auth_seq_id", "pdbx_formal_charge", "secondaryStructureKey", "secondaryStructureFlags", "isModified", "modifiedParentName"];
-      flagProps = [
-        "structure-query.atom-property.macromolecular.secondary-structure-flags"
-      ];
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/jmol/properties.js
-  function str9(x) {
-    return x;
-  }
-  function structureMap(x) {
-    if (x.head) {
-      if (x.head.name && x.head.name === "core.type.regex")
-        x = x.args[0].replace(/^\^|\$$/g, "");
-      x = structureDict[x.toString().toLowerCase()] || "none";
-      if (["dna", "rna", "carbohydrate"].indexOf(x) !== -1) {
-        throw new Error("values 'dna', 'rna', 'carbohydrate' not yet supported for 'structure' property");
-      } else {
-        return B2.struct.type.secondaryStructureFlags([x]);
-      }
-    }
-  }
-  var B2, reFloat, rePosInt, structureDict, properties;
-  var init_properties3 = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/jmol/properties.js"() {
-      init_builder();
-      B2 = MolScriptBuilder;
-      reFloat = /[-+]?[0-9]*\.?[0-9]+/;
-      rePosInt = /[0-9]+/;
-      structureDict = {
-        none: "none",
-        turn: "turn",
-        sheet: "beta",
-        helix: "helix",
-        dna: "dna",
-        rna: "rna",
-        carbohydrate: "carbohydrate",
-        helix310: "3-10",
-        helixalpha: "alpha",
-        helixpi: "pi",
-        0: "none",
-        1: "turn",
-        2: "beta",
-        3: "helix",
-        4: "dna",
-        5: "rna",
-        6: "carbohydrate",
-        7: "3-10",
-        8: "alpha",
-        9: "pi"
-      };
-      properties = {
-        adpmax: {
-          "@desc": "the maximum anisotropic displacement parameter for the selected atom",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: reFloat,
-          map: (x) => parseFloat(x),
-          level: "atom-test"
-        },
-        adpmin: {
-          "@desc": "the minimum anisotropic displacement parameter for the selected atom",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: reFloat,
-          map: (x) => parseFloat(x),
-          level: "atom-test"
-        },
-        altloc: {
-          "@desc": "PDB alternate location identifier",
-          "@examples": ["altloc = A"],
-          regex: /[a-zA-Z0-9]/,
-          map: str9,
-          level: "atom-test",
-          property: B2.ammp("label_alt_id")
-        },
-        altname: {
-          "@desc": "an alternative name given to atoms by some file readers (for example, P2N)",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[a-zA-Z0-9]/,
-          map: str9,
-          level: "atom-test"
-        },
-        atomID: {
-          "@desc": "special atom IDs for PDB atoms assigned by Jmol",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: rePosInt,
-          map: (x) => parseInt(x),
-          level: "atom-test"
-        },
-        atomIndex: {
-          "@desc": "atom 0-based index; a unique number for each atom regardless of the number of models loaded",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: rePosInt,
-          map: (x) => parseInt(x),
-          level: "atom-test"
-        },
-        atomName: {
-          "@desc": "atom name",
-          "@examples": ["atomName = CA"],
-          regex: /[a-zA-Z0-9]+/,
-          map: (v2) => B2.atomName(v2),
-          level: "atom-test",
-          property: B2.ammp("label_atom_id")
-        },
-        atomno: {
-          "@desc": 'sequential number; you can use "@" instead of "atomno=" -- for example, select @33 or Var x = @33 or @35',
-          "@examples": [""],
-          isUnsupported: true,
-          regex: rePosInt,
-          map: (x) => parseInt(x),
-          level: "atom-test"
-        },
-        atomType: {
-          "@desc": "atom type (mol2, AMBER files) or atom name (other file types)",
-          "@examples": ["atomType = OH"],
-          regex: /[a-zA-Z0-9]+/,
-          map: (v2) => B2.atomName(v2),
-          level: "atom-test",
-          property: B2.ammp("label_atom_id")
-        },
-        atomX: {
-          "@desc": "Cartesian X coordinate (or just X)",
-          "@examples": ["x = 4.2"],
-          abbr: ["X"],
-          isNumeric: true,
-          regex: reFloat,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B2.acp("x")
-        },
-        atomY: {
-          "@desc": "Cartesian Y coordinate (or just Y)",
-          "@examples": ["y < 42"],
-          abbr: ["Y"],
-          isNumeric: true,
-          regex: reFloat,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B2.acp("y")
-        },
-        atomZ: {
-          "@desc": "Cartesian Z coordinate (or just Z)",
-          "@examples": ["Z > 10"],
-          abbr: ["Z"],
-          isNumeric: true,
-          regex: reFloat,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B2.acp("z")
-        },
-        bondcount: {
-          "@desc": "covalent bond count",
-          "@examples": ["bondcount = 0"],
-          isNumeric: true,
-          regex: rePosInt,
-          map: (x) => parseInt(x),
-          level: "atom-test",
-          property: B2.acp("bondCount")
-        },
-        bondingRadius: {
-          "@desc": "radius used for auto bonding; synonymous with ionic and ionicRadius",
-          "@examples": [""],
-          abbr: ["ionic", "ionicRadius"],
-          isUnsupported: true,
-          regex: reFloat,
-          map: (x) => parseFloat(x),
-          level: "atom-test"
-        },
-        cell: {
-          "@desc": 'crystallographic unit cell, expressed either in lattice integer notation (111-999) or as a coordinate in ijk space, where {1 1 1} is the same as 555. ANDing two cells, for example select cell=555 and cell=556, selects the atoms on the common face. (Note: in the specifc case of CELL, only "=" is allowed as a comparator.)',
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        configuration: {
-          "@desc": 'Only in the context {configuration=n}, this option selects the set of atoms with either no ALTLOC specified or those atoms having this index into the array of altlocs within its model. So, for example, if the model has altloc "A" and "B", select configuration=1 is equivalent to select altloc="" or altloc="A", and print {configuration=2} is equivalent to print {altloc="" or altloc="B"}. Configuration 0 is "all atoms in a model having configurations", and an invalid configuration number gives no atoms. (Note: in the specifc case of CONFIGURATION, only "=" is allowed as a comparator.)',
-          "@examples": [""],
-          isUnsupported: true,
-          regex: rePosInt,
-          map: (x) => parseInt(x),
-          level: "atom-test"
-        },
-        chain: {
-          "@desc": 'protein chain. For newer CIF files allowing multicharacter chain specifications, use quotations marks: select chain="AA". For these multicharacter desigations, case is not checked unless the CIF file has lower-case chain designations.',
-          "@examples": ["chain = A", 'chain = "AA"'],
-          regex: /[a-zA-Z0-9]+/,
-          map: str9,
-          level: "chain-test",
-          property: B2.ammp("auth_asym_id")
-        },
-        chainNo: {
-          "@desc": 'chain number; sequentially counted from 1 for each model; chainNo == 0 means"no chain" or PDB chain identifier indicated as a blank (Jmol 14.0).',
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        color: {
-          "@desc": "the atom color",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        covalentRadius: {
-          "@desc": "covalent bonding radius, synonymous with covalent. Not used by Jmol, but could be used, for example, in {*}.spacefill={*}.covalentRadius.all.",
-          "@examples": [""],
-          abbr: ["covalent"],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        cs: {
-          "@desc": "chemical shift calculated using computational results that include magnetic shielding tensors.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        element: {
-          "@desc": 'element symbol. The value of this parameter depends upon the context. Used with select structure=x, x can be either the quoted element symbol, "H", "He", "Li", etc. or atomic number. In all other contexts, the value is the element symbol. When the atom is a specific isotope, the string will contain the isotope number -- "13C", for example.',
-          "@examples": ["element=Fe"],
-          regex: /[a-zA-Z]+/,
-          map: (x) => B2.es(x),
-          level: "atom-test",
-          property: B2.acp("elementSymbol")
-        },
-        elemno: {
-          "@desc": "atomic element number",
-          "@examples": ["elemno=8"],
-          regex: /[0-9\s{}-]+/,
-          map: (x) => parseInt(x),
-          level: "atom-test",
-          property: B2.acp("atomicNumber")
-        },
-        eta: {
-          "@desc": `Based on Carlos M. Duarte, Leven M. Wadley, and Anna Marie Pyle, RNA structure comparison, motif search and discovery using a reduced representation of RNA conformational space, Nucleic Acids Research, 2003, Vol. 31, No. 16 4755-4761. The parameter eta is the C4'[i-1]-P[i]-C4'[i]-P[i+1] dihedral angle; theta is the P[i]-C4'[i]-P[i+1]-C4'[i+1] dihedral angle. Both are measured on a 0-360 degree scale because they are commonly near 180 degrees. Using the commands plot PROPERTIES eta theta resno; select visible;wireframe only one can create these authors' "RNA worm" graph.`,
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        theta: {
-          "@desc": `Based on Carlos M. Duarte, Leven M. Wadley, and Anna Marie Pyle, RNA structure comparison, motif search and discovery using a reduced representation of RNA conformational space, Nucleic Acids Research, 2003, Vol. 31, No. 16 4755-4761. The parameter eta is the C4'[i-1]-P[i]-C4'[i]-P[i+1] dihedral angle; theta is the P[i]-C4'[i]-P[i+1]-C4'[i+1] dihedral angle. Both are measured on a 0-360 degree scale because they are commonly near 180 degrees. Using the commands plot PROPERTIES eta theta resno; select visible;wireframe only one can create these authors' "RNA worm" graph.`,
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        file: {
-          "@desc": "file number containing this atom",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        formalCharge: {
-          "@desc": "formal charge",
-          "@examples": ["formalCharge=1"],
-          regex: reFloat,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B2.ammp("pdbx_formal_charge")
-        },
-        format: {
-          "@desc": "format (label) of the atom.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        fXyz: {
-          "@desc": "fractional XYZ coordinates",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        fX: {
-          "@desc": "fractional X coordinate",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        fY: {
-          "@desc": "fractional Y coordinate",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        fZ: {
-          "@desc": "fractional Z coordinate",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        fuxyz: {
-          "@desc": "fractional XYZ coordinates in the unitcell coordinate system",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        fux: {
-          "@desc": "fractional X coordinate in the unitcell coordinate system",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        fuy: {
-          "@desc": "fractional Y coordinate in the unitcell coordinate system",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        fuz: {
-          "@desc": "fractional Z coordinate in the unit cell coordinate system",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        group: {
-          "@desc": "3-letter residue code",
-          "@examples": ["group = ALA"],
-          regex: /[a-zA-Z0-9]{1,3}/,
-          map: str9,
-          level: "residue-test",
-          property: B2.ammp("label_comp_id")
-        },
-        group1: {
-          "@desc": "single-letter residue code (amino acids only)",
-          "@examples": ["group1 = G"],
-          regex: /[a-zA-Z]/,
-          map: str9,
-          level: "residue-test",
-          property: B2.ammp("label_comp_id")
-        },
-        groupID: {
-          "@desc": "group ID number: A unique ID for each amino acid or nucleic acid residue in a PDB file. 0  noGroup 1-5  ALA, ARG, ASN, ASP, CYS 6-10  GLN, GLU, GLY, HIS, ILE 11-15  LEU, LYS, MET, PHE, PRO 16-20  SER, THR, TRP, TYR, VAL 21-23  ASX, GLX, UNK 24-29  A, +A, G, +G, I, +I 30-35  C, +C, T, +T, U, +U Additional unique numbers are assigned arbitrarily by Jmol and cannot be used reproducibly.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        groupindex: {
-          "@desc": "overall group index",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        hydrophobicity: {
-          "@desc": "Aminoacid residue scale of hydrophobicity based on Rose, G. D., Geselowitz, A. R., Lesser, G. J., Lee, R. H., and Zehfus, M. H. (1985). Hydrophobicity of amino acid residues in globular proteins, Science, 229(4716):834-838.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        identify: {
-          "@desc": "for a PDB/mmCIF file, a label such as [ILE]7^1:A.CD1%A/3 #47, which includes the group ([ILE]), residue number with optional insertion code (7^1), chain (:A), atom name (CD1), alternate location if present (%A), PDB model number (/3, for NMR models when one file is loaded; /file.model such as /2.3 if more than one file is loaded), and atom number (#47). For non-PDB data, the information is shorter -- for example, H15/2.1 #6, indicating atom name (H15), full file.model number (/2.1), and atom number (#6). If only a single model is loaded, %[identify] does not include the model number.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        insertion: {
-          "@desc": "protein residue insertion code",
-          "@examples": ["insertion=A"],
-          regex: /[a-zA-Z0-9]/,
-          map: str9,
-          level: "atom-test",
-          property: B2.ammp("pdbx_PDB_ins_code")
-        },
-        label: {
-          "@desc": "current atom label (same as format)",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        mass: {
-          "@desc": "atomic mass -- especially useful with appended .max or .sum",
-          "@examples": ["mass > 13"],
-          regex: reFloat,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B2.acp("mass")
-        },
-        model: {
-          "@desc": "model number",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        modelindex: {
-          "@desc": "a unique number for each model, starting with 0 and spanning all models in all files",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        modO: {
-          "@desc": "currently calculated occupancy from modulation (0 to 100; NaN if atom has no occupancy modulation)",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        modXYZ: {
-          "@desc": "currently calculated displacement modulation (for incommensurately modulated structures). Also modX, modY, modZ for individual components. For atoms without modultion, {xx}.modXYZ is -1 and {xx}.modX is NaN, and in a label %[modXYZ] and %[modX] are blank.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        molecule: {
-          "@desc": "molecule number",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        monomer: {
-          "@desc": "monomer number (group number) in a polymer (usually a chain), starting with 1, or 0 if not part of a biopolymer -- that is, not a connected carbohydrate, amino acid, or nucleic acid (Jmol 14.3.15)",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        ms: {
-          "@desc": "magnetic shielding calculated from file-loaded tensors.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        occupancy: {
-          "@desc": 'CIF file site occupancy. In SELECT command comparisons ("select occupancy < 90"), an integer n implies measurement on a 0-100 scale; also, in the context %[occupancy] or %q for a label, the reported number is a percentage. In all other cases, such as when %Q is used in a label or when a decimal number is used in a comparison, the scale is 0.0 - 1.0.',
-          "@examples": ["occupancy < 1"],
-          regex: reFloat,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B2.ammp("occupancy")
-        },
-        partialCharge: {
-          "@desc": "partial charge",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: reFloat,
-          map: (x) => parseFloat(x),
-          level: "atom-test"
-        },
-        phi: {
-          "@desc": "protein group PHI angle for atom's residue",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        polymer: {
-          "@desc": "sequential polymer number in a model, starting with 1.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        polymerLength: {
-          "@desc": "polymer length",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        property_xx: {
-          "@desc": "a property created using the DATA command",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        psi: {
-          "@desc": "protein group PSI angle for the atom's residue",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        radius: {
-          "@desc": 'currently displayed radius -- In SELECT command comparisons ("select radius=n"), integer n implies Rasmol units 1/250 Angstroms; in all other cases or when a decimal number is used, the units are Angstroms.',
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        resno: {
-          "@desc": "PDB residue number, not including insertion code (see also seqcode, below)",
-          "@examples": ["resno = 100"],
-          regex: /-?[0-9]+/,
-          map: (x) => parseInt(x),
-          level: "residue-test",
-          property: B2.ammp("auth_seq_id")
-        },
-        selected: {
-          "@desc": "1.0 if atom is selected; 0.0 if not",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        sequence: {
-          "@desc": 'PDB one-character sequence code, as a string of characters, with "?" indicated where single-character codes are not available',
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        seqcode: {
-          "@desc": 'PDB residue number, including insertion code (for example, 234^2; "seqcode" option added in Jmol 14.3.16)',
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        seqid: {
-          "@desc": "(mmCIF only) the value from _atom_site.label_seq_id; a pointer to _entity_poly_seq.num in the ENTITY_POLY_SEQ category specifying the sequence of monomers in a polymer. Allowance is made for the possibility of microheterogeneity in a sample by allowing a given sequence number to be correlated with more than one monomer id. (Jmol 14.2.3)",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        shape: {
-          "@desc": 'hybridization geometry such as "tetrahedral"',
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        site: {
-          "@desc": "crystallographic site number",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        spacefill: {
-          "@desc": "currently displayed radius",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        straightness: {
-          "@desc": 'quaternion-derived straightness (second derivative of the quaternion describing the orientation of the residue. This quantity will have different values depending upon the setting of quaternionFrame as "A" (alpha-carbon/phosphorus atom only), "C" (alpha-carbon/pyrimidine or purine base based), "P" (carbonyl-carbon peptide plane/phosphorus tetrahedron based), or "N" (amide-nitrogen based). The default is alpha-carbon based, which corresponds closely to the following combination of Ramachandran angles involving three consecutive residues i-1, i, and i+1: -psii-1 - phii + psii + phii+1.',
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        strucno: {
-          "@desc": "a unique number for each helix, sheet, or turn in a model, starting with 1.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        structure: {
-          "@desc": 'The value of this parameter depends upon the context. Used with select structure=x, x can be either the quoted keyword "none", "turn", "sheet", "helix", "dna", "rna", or "carbohydrate" or a respective number 0-6. In the context {*}.structure, the return value is a number; in the context label %[structure], the return is one of the six keywords.',
-          "@examples": ['structure="helix"', "structure=3"],
-          regex: /none|turn|sheet|helix|dna|rna|carbohydrate|[0-6]/i,
-          map: str9,
-          level: "residue-test",
-          property: "structure"
-        },
-        substructure: {
-          "@desc": 'like structure, the value of this parameter depends upon the context. Used with select substructure=x, x can be either the quoted keyword "none", "turn", "sheet", "helix", "dna", "rna", "carbohydrate", "helix310", "helixalpha", or "helixpi", or the respective number 0-9. In the context {*}.substructure, the return value is a number; in the context label %[substructure], the return is one of the nine keywords.',
-          "@examples": ['substructure = "alphahelix"', "substructure =9"],
-          regex: /none|turn|sheet|helix|dna|rna|carbohydrate|helix310|helixalpha|helixpi|[0-9]/i,
-          map: str9,
-          level: "residue-test",
-          property: "structure"
-        },
-        surfacedistance: {
-          "@desc": "A value related to the distance of an atom to a nominal molecular surface. 0 indicates at the surface. Positive numbers are minimum distances in Angstroms from the given atom to the surface.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        symop: {
-          "@desc": 'the first symmetry operation code that generated this atom by Jmol; an integer starting with 1. See also symmetry, below. This operator is only present if the file contains space group information and the file was loaded using the {i, j, k} option so as to generate symmetry-based atoms. To select only the original atoms prior to application of symmetry, you can either use "SYMOP=n", where n is the symmetry operator corresponding to "x,y,z", or you can specify instead simply "NOT symmetry" the way you might specify "NOT hydrogen". Note that atoms in special positions will have multiple operator matches. These atoms can be selected using the keyword SPECIALPOSITION. The special form select SYMOP=nijk selects a specific translation of atoms from the given crystallographic symmetry operation. Comparators <, <=, >, >=, and != can be used and only apply to the ijk part of the designation. The ijk are relative, not absolute. Thus, symop=2555 selects for atoms that have been transformed by symop=2 but not subjected to any further translation. select symop=1555 is identical to select not symmetry. All other ijk are relative to these selections for 555. If the model was loaded using load "filename.cif" {444 666 1}, where the 1 indicates that all symmetry-generated atoms are to be packed within cell 555 and then translated to fill the other 26 specified cells, then select symop=3555 is nearly the same as select symop=3 and cell=555. (The difference being that cell=555 selects for all atoms that are on any edge of the cell, while symop=3555 does not.) However, the situation is different if instead the model was loaded using load "filename.cif" {444 666 0}, where the 0 indicates that symmetry-generated atoms are to be placed exactly where their symmetry operator would put them (x,-y,z being different then from x, 1-y, z). In that case, select symop=3555 is for all atoms that have been generated using symmetry operation 3 but have not had any additional translations applied to the x,y,z expression found in the CIF file. If, for example, symmetry operation 3 is -x,-y,-z, then load "filename.cif" {444 666 0} will place an atom originally at {1/2, 1/2, 1/2} at positions {-1/2, -1/2, -1/2} (symop=3555) and {-3/2, -3/2, -3/2} (symop=3444) and 24 other sites.',
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        symmetry: {
-          "@desc": 'as "symmetry" or in a label as lower-case "o" gives list of crystallographic symmetry operators generating this atom with lattice designations,such as 3555; upper-case "%O" in a label gives a list without the lattice designations. See also symop, above.',
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        temperature: {
-          "@desc": "yes  yes  temperature factor (B-factor)",
-          "@examples": ["temperature >= 20"],
-          regex: reFloat,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B2.ammp("B_iso_or_equiv")
-        },
-        unitXyz: {
-          "@desc": "unit cell XYZ coordinates",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        uX: {
-          "@desc": "unit cell X coordinate normalized to [0,1)",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        uY: {
-          "@desc": "unit cell Y coordinate normalized to [0,1)",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        uZ: {
-          "@desc": "unit cell Z coordinate normalized to [0,1)",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        valence: {
-          "@desc": "the valence of an atom (sum of bonds, where double bond counts as 2 and triple bond counts as 3",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        vanderwaals: {
-          "@desc": "van der Waals radius",
-          "@examples": ["vanderwaals >2"],
-          regex: reFloat,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B2.acp("vdw")
-        },
-        vectorScale: {
-          "@desc": "vibration vector scale",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        volume: {
-          "@desc": "approximate van der Waals volume for this atom. Note, {*}.volume gives an average; use {*}.volume.sum to get total volume.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        vXyz: {
-          "@desc": "vibration vector, or individual components as %vx %vy %vz. For atoms without vibration vectors, {xx}.vXyz is -1; in a label, %[vxyz] is blank.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        vX: {
-          "@desc": "vibration vector X coordinate; for atoms without vibration vector, {xx}.vX is NaN (same for vY and vZ)",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        vY: {
-          "@desc": "vibration vector Y coordinate",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        vZ: {
-          "@desc": "vibration vector Z coordinate",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        },
-        xyz: {
-          "@desc": "Cartesian XYZ coordinates; select xyz > 1.0 selects atoms more than one Angstrom from the origin.",
-          "@examples": [""],
-          isUnsupported: true,
-          regex: /[0-9\s{}-]+/,
-          map: str9,
-          level: "atom-test"
-        }
-      };
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/jmol/operators.js
-  var B3, operators;
-  var init_operators = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/jmol/operators.js"() {
-      init_monadic_parser();
-      init_helper();
-      init_builder();
-      B3 = MolScriptBuilder;
-      operators = [
-        {
-          "@desc": "Selects atoms that are not included in s1.",
-          "@examples": ["not ARG"],
-          name: "not",
-          type: prefix,
-          rule: MonadicParser.alt(MonadicParser.regex(/NOT/i).skip(MonadicParser.whitespace), MonadicParser.string("!").skip(MonadicParser.optWhitespace)),
-          map: (op2, selection) => invertExpr(selection)
-        },
-        {
-          "@desc": "Selects atoms included in both s1 and s2.",
-          "@examples": ["ASP and .CA"],
-          name: "and",
-          type: binaryLeft,
-          rule: infixOp(/AND|&/i),
-          map: (op2, selection, by) => B3.struct.modifier.intersectBy({ 0: selection, by })
-        },
-        {
-          "@desc": "Selects atoms included in either s1 or s2.",
-          "@examples": ["ASP or GLU"],
-          name: "or",
-          type: binaryLeft,
-          rule: infixOp(/OR|\||,/i),
-          map: (op2, s1, s2) => B3.struct.combinator.merge([s1, s2])
-        }
-      ];
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/jmol/keywords.js
-  function nucleicExpr() {
-    return B4.struct.combinator.merge([
-      B4.struct.generator.atomGroups({
-        "residue-test": B4.core.set.has([
-          B4.set(...ResDict.nucleic),
-          B4.ammp("label_comp_id")
-        ])
-      }),
-      B4.struct.filter.pick({
-        0: B4.struct.generator.atomGroups({
-          "group-by": B4.ammp("residueKey")
-        }),
-        test: B4.core.logic.and([
-          B4.core.rel.eq([B4.struct.atomSet.atomCount(), 1]),
-          B4.core.rel.eq([B4.ammp("label_atom_id"), B4.atomName("P")])
-        ])
-      }),
-      B4.struct.filter.pick({
-        0: B4.struct.generator.atomGroups({
-          "group-by": B4.ammp("residueKey")
-        }),
-        test: B4.core.logic.or([
-          B4.core.set.isSubset([
-            atomNameSet(["C1'", "C2'", "O3'", "C3'", "C4'", "C5'", "O5'"]),
-            B4.ammpSet("label_atom_id")
-          ]),
-          B4.core.set.isSubset([
-            atomNameSet(["C1*", "C2*", "O3*", "C3*", "C4*", "C5*", "O5*"]),
-            B4.ammpSet("label_atom_id")
-          ])
-        ])
-      })
-    ]);
-  }
-  function proteinExpr() {
-    return B4.struct.generator.atomGroups({
-      "residue-test": B4.core.set.has([
-        B4.set(...ResDict.amino),
-        B4.ammp("label_comp_id")
-      ])
-    });
-  }
-  function backboneExpr() {
-    return B4.struct.combinator.merge([
-      B4.struct.modifier.intersectBy({
-        0: B4.struct.generator.atomGroups({
-          "residue-test": B4.core.set.has([
-            B4.core.type.set(ResDict.amino),
-            B4.ammp("label_comp_id")
-          ])
-        }),
-        by: B4.struct.generator.atomGroups({
-          "atom-test": B4.core.set.has([
-            B4.core.type.set(Backbone.protein),
-            B4.ammp("label_atom_id")
-          ])
-        })
-      }),
-      B4.struct.modifier.intersectBy({
-        0: B4.struct.generator.atomGroups({
-          "residue-test": B4.core.set.has([
-            B4.core.type.set(ResDict.nucleic),
-            B4.ammp("label_comp_id")
-          ])
-        }),
-        by: B4.struct.generator.atomGroups({
-          "atom-test": B4.core.set.has([
-            B4.core.type.set(Backbone.nucleic),
-            B4.ammp("label_atom_id")
-          ])
-        })
-      })
-    ]);
-  }
-  var B4, ResDict, Backbone, keywords;
-  var init_keywords = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/jmol/keywords.js"() {
-      init_builder();
-      init_helper();
-      B4 = MolScriptBuilder;
-      ResDict = {
-        acidic: ["ASP", "GLU"],
-        aliphatic: ["ALA", "GLY", "ILE", "LEU", "VAL"],
-        amino: ["ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE", "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL", "ASX", "GLX", "UNK"],
-        aromatic: ["HIS", "PHE", "TRP", "TYR"],
-        basic: ["ARG", "HIS", "LYS"],
-        buried: ["ALA", "CYS", "ILE", "LEU", "MET", "PHE", "TRP", "VAL"],
-        cg: ["CYT", "C", "GUA", "G"],
-        cyclic: ["HIS", "PHE", "PRO", "TRP", "TYR"],
-        hydrophobic: ["ALA", "GLY", "ILE", "LEU", "MET", "PHE", "PRO", "TRP", "TYR", "VAL"],
-        large: ["ARG", "GLU", "GLN", "HIS", "ILE", "LEU", "LYS", "MET", "PHE", "TRP", "TYR"],
-        medium: ["ASN", "ASP", "CYS", "PRO", "THR", "VAL"],
-        small: ["ALA", "GLY", "SER"],
-        nucleic: ["G", "C", "A", "T", "U", "I", "DG", "DC", "DA", "DT", "DU", "DI", "+G", "+C", "+A", "+T", "+U", "+I"]
-      };
-      Backbone = {
-        nucleic: [
-          "P",
-          "O3'",
-          "O5'",
-          "C5'",
-          "C4'",
-          "C3'",
-          "OP1",
-          "OP2",
-          "O3*",
-          "O5*",
-          "C5*",
-          "C4*",
-          "C3*",
-          "C2'",
-          "C1'",
-          "O4'",
-          "O2'"
-        ],
-        protein: ["C", "N", "CA"]
-      };
-      keywords = {
-        // general terms
-        all: {
-          "@desc": "all atoms; same as *",
-          abbr: ["*"],
-          map: () => B4.struct.generator.all()
-        },
-        bonded: {
-          "@desc": "covalently bonded",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.rel.gr([B4.struct.atomProperty.core.bondCount({
-              flags: B4.struct.type.bondFlags(["covalent", "metallic", "sulfide"])
-            }), 0])
-          })
-        },
-        clickable: {
-          "@desc": "actually visible -- having some visible aspect such as wireframe, spacefill, or a label showing, or the alpha-carbon or phosphorus atom in a biomolecule that is rendered with only cartoon, rocket, or other biomolecule-specific shape."
-        },
-        connected: {
-          "@desc": "bonded in any way, including hydrogen bonds",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.rel.gr([B4.struct.atomProperty.core.bondCount({
-              flags: B4.struct.type.bondFlags()
-            }), 0])
-          })
-        },
-        displayed: {
-          "@desc": "displayed using the display or hide command; not necessarily visible"
-        },
-        hidden: {
-          "@desc": "hidden using the display or hide command"
-        },
-        none: {
-          "@desc": "no atoms",
-          map: () => B4.struct.generator.empty()
-        },
-        selected: {
-          "@desc": "atoms that have been selected; defaults to all when a file is first loaded"
-        },
-        thisModel: {
-          "@desc": 'atoms in the current frame set, as defined by frame, model, or animation commands. If more than one model is in this set, "thisModel" refers to all of them, regardless of atom displayed/hidden status.'
-        },
-        visible: {
-          "@desc": "visible in any way, including PDB residue atoms for which a cartoon or other such rendering makes their group visible, even if they themselves are not visible."
-        },
-        subset: {
-          "@desc": "the currently defined subset. Note that if a subset is currently defined, then select/display all is the same as select/display subset, restrict none is the same as restrict not subset. In addition, select not subset selects nothing."
-        },
-        specialPosition: {
-          "@desc": "atoms in crystal structures that are at special positions - that is, for which there is more than one operator that leads to them."
-        },
-        unitcell: {
-          "@desc": "atoms within the current unitcell, which may be offset. This includes atoms on the faces and at the vertices of the unitcell."
-        },
-        polyhedra: {
-          "@desc": "all central atoms for which polyhedra have been created. See also polyhera(n), below. (Jmol 14.4)"
-        },
-        nonmetal: {
-          "@desc": "_H,_He,_B,_C,_N,_O,_F,_Ne,_Si,_P,_S,_Cl,_Ar,_As,_Se,_Br,_Kr,_Te,_I,_Xe,_At,_Rn",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.set.has([
-              B4.set(...["H", "He", "B", "C", "N", "O", "F", "Ne", "Si", "P", "S", "Cl", "Ar", "As", "Se", "Br", "Kr", "Te", "I", "Xe", "At", "Rn"].map(B4.es)),
-              B4.acp("elementSymbol")
-            ])
-          })
-        },
-        metal: {
-          "@desc": "!nonmetal",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.logic.not([
-              B4.core.set.has([
-                B4.set(...["H", "He", "B", "C", "N", "O", "F", "Ne", "Si", "P", "S", "Cl", "Ar", "As", "Se", "Br", "Kr", "Te", "I", "Xe", "At", "Rn"].map(B4.es)),
-                B4.acp("elementSymbol")
-              ])
-            ])
-          })
-        },
-        alkaliMetal: {
-          "@desc": "_Li,_Na,_K,_Rb,_Cs,_Fr",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.set.has([
-              B4.set(...["Li", "Na", "K", "Rb", "Cs", "Fr"].map(B4.es)),
-              B4.acp("elementSymbol")
-            ])
-          })
-        },
-        alkalineEarth: {
-          "@desc": "_Be,_Mg,_Ca,_Sr,_Ba,_Ra",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.set.has([
-              B4.set(...["Be", "Mg", "Ca", "Sr", "Ba", "Ra"].map(B4.es)),
-              B4.acp("elementSymbol")
-            ])
-          })
-        },
-        nobleGas: {
-          "@desc": "_He,_Ne,_Ar,_Kr,_Xe,_Rn",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.set.has([
-              B4.set(...["He", "Ne", "Ar", "Kr", "Xe", "Rn"].map(B4.es)),
-              B4.acp("elementSymbol")
-            ])
-          })
-        },
-        metalloid: {
-          "@desc": "_B,_Si,_Ge,_As,_Sb,_Te",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.set.has([
-              B4.set(...["B", "Si", "Ge", "As", "Sb", "Te"].map(B4.es)),
-              B4.acp("elementSymbol")
-            ])
-          })
-        },
-        transitionMetal: {
-          "@desc": "(includes La and Ac) elemno>=21 and elemno<=30, elemno=57, elemno=89, elemno>=39 and elemno<=48, elemno>=72 and elemno<=80, elemno>=104 and elemno<=112",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.logic.or([
-              B4.core.rel.inRange([B4.acp("atomicNumber"), 21, 30]),
-              B4.core.rel.inRange([B4.acp("atomicNumber"), 39, 48]),
-              B4.core.rel.inRange([B4.acp("atomicNumber"), 72, 80]),
-              B4.core.rel.inRange([B4.acp("atomicNumber"), 104, 112]),
-              B4.core.set.has([B4.set(57, 89), B4.acp("atomicNumber")])
-            ])
-          })
-        },
-        lanthanide: {
-          "@desc": "(does not include La) elemno>57 and elemno<=71",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.rel.inRange([B4.acp("atomicNumber"), 57, 71])
-          })
-        },
-        actinide: {
-          "@desc": "(does not include Ac) elemno>89 and elemno<=103",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.rel.inRange([B4.acp("atomicNumber"), 89, 103])
-          })
-        },
-        isaromatic: {
-          "@desc": "atoms connected with the AROMATIC, AROMATICSINGLE, or AROMATICDOUBLE bond types",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.rel.gr([
-              B4.struct.atomProperty.core.bondCount({
-                flags: B4.struct.type.bondFlags(["aromatic"])
-              }),
-              0
-            ])
-          })
-        },
-        carbohydrate: {
-          "@desc": ""
-        },
-        ions: {
-          "@desc": '(specifically the PDB designations "PO4" and "SO4")'
-        },
-        ligand: {
-          "@desc": '(originally "hetero and not solvent"; changed to "!(protein,nucleic,water,UREA)" for Jmol 12.2)'
-        },
-        nucleic: {
-          "@desc": `any group that (a) has one of the following group names: G, C, A, T, U, I, DG, DC, DA, DT, DU, DI, +G, +C, +A, +T, +U, +I; or (b) can be identified as a group that is only one atom, with name "P"; or (c) has all of the following atoms (prime, ', can replace * here): C1*, C2*, C3*, O3*, C4*, C5*, and O5*.`,
-          map: () => nucleicExpr()
-        },
-        purine: {
-          "@desc": "any nucleic group that (a) has one of the following group names: A, G, I, DA, DG, DI, +A, +G, or +I; or (b) also has atoms N7, C8, and N9.",
-          map: () => B4.struct.modifier.intersectBy({
-            0: nucleicExpr(),
-            by: B4.struct.combinator.merge([
-              B4.struct.generator.atomGroups({
-                "residue-test": B4.core.set.has([
-                  B4.set(...["A", "G", "I", "DA", "DG", "DI", "+A", "+G", "+I"]),
-                  B4.ammp("label_comp_id")
-                ])
-              }),
-              B4.struct.filter.pick({
-                0: B4.struct.generator.atomGroups({
-                  "group-by": B4.ammp("residueKey")
-                }),
-                test: B4.core.set.isSubset([
-                  atomNameSet(["N7", "C8", "N9"]),
-                  B4.ammpSet("label_atom_id")
-                ])
-              })
-            ])
-          })
-        },
-        pyrimidine: {
-          "@desc": "any nucleic group that (a) has one of the following group names: C, T, U, DC, DT, DU, +C, +T, +U; or (b) also has atom O2.",
-          map: () => B4.struct.modifier.intersectBy({
-            0: nucleicExpr(),
-            by: B4.struct.combinator.merge([
-              B4.struct.generator.atomGroups({
-                "residue-test": B4.core.set.has([
-                  B4.set(...["C", "T", "U", "DC", "DT", "DU", "+C", "+T", "+U"]),
-                  B4.ammp("label_comp_id")
-                ])
-              }),
-              B4.struct.filter.pick({
-                0: B4.struct.generator.atomGroups({
-                  "group-by": B4.ammp("residueKey")
-                }),
-                test: B4.core.logic.or([
-                  B4.core.set.has([
-                    B4.ammpSet("label_atom_id"),
-                    B4.atomName("O2*")
-                  ]),
-                  B4.core.set.has([
-                    B4.ammpSet("label_atom_id"),
-                    B4.atomName("O2'")
-                  ])
-                ])
-              })
-            ])
-          })
-        },
-        dna: {
-          "@desc": "any nucleic group that (a) has one of the following group names: DG, DC, DA, DT, DU, DI, T, +G, +C, +A, +T; or (b) has neither atom O2* or O2'.",
-          map: () => B4.struct.modifier.intersectBy({
-            0: nucleicExpr(),
-            by: B4.struct.combinator.merge([
-              B4.struct.generator.atomGroups({
-                "residue-test": B4.core.set.has([
-                  B4.set(...["DG", "DC", "DA", "DT", "DU", "DI", "T", "+G", "+C", "+A", "+T"]),
-                  B4.ammp("label_comp_id")
-                ])
-              }),
-              B4.struct.filter.pick({
-                0: B4.struct.generator.atomGroups({
-                  "group-by": B4.ammp("residueKey")
-                }),
-                test: B4.core.logic.not([
-                  B4.core.logic.or([
-                    B4.core.set.has([
-                      B4.ammpSet("label_atom_id"),
-                      B4.atomName("O2*")
-                    ]),
-                    B4.core.set.has([
-                      B4.ammpSet("label_atom_id"),
-                      B4.atomName("O2'")
-                    ])
-                  ])
-                ])
-              })
-            ])
-          })
-        },
-        rna: {
-          "@desc": "any nucleic group that (a) has one of the following group names: G, C, A, U, I, +U, +I; or (b) has atom O2* or O2'.",
-          map: () => B4.struct.modifier.intersectBy({
-            0: nucleicExpr(),
-            by: B4.struct.combinator.merge([
-              B4.struct.generator.atomGroups({
-                "residue-test": B4.core.set.has([
-                  B4.set(...["G", "C", "A", "U", "I", "+U", "+I"]),
-                  B4.ammp("label_comp_id")
-                ])
-              }),
-              B4.struct.filter.pick({
-                0: B4.struct.generator.atomGroups({
-                  "group-by": B4.ammp("residueKey")
-                }),
-                test: B4.core.logic.or([
-                  B4.core.set.has([
-                    B4.ammpSet("label_atom_id"),
-                    B4.atomName("O2*")
-                  ]),
-                  B4.core.set.has([
-                    B4.ammpSet("label_atom_id"),
-                    B4.atomName("O2'")
-                  ])
-                ])
-              })
-            ])
-          })
-        },
-        protein: {
-          "@desc": 'defined as a group that (a) has one of the following group names: ALA, ARG, ASN, ASP, CYS, GLN, GLU, GLY, HIS, ILE, LEU, LYS, MET, PHE, PRO, SER, THR, TRP, TYR, VAL, ASX, GLX, or UNK; or (b) contains PDB atom designations [C, O, CA, and N] bonded correctly; or (c) does not contain "O" but contains [C, CA, and N] bonded correctly; or (d) has only one atom, which has name CA and does not have the group name CA (indicating a calcium atom).',
-          map: () => proteinExpr()
-        },
-        acidic: {
-          "@desc": "ASP GLU",
-          map: () => resnameExpr(ResDict.acidic)
-        },
-        acyclic: {
-          "@desc": "amino and not cyclic",
-          map: () => B4.struct.modifier.intersectBy({
-            0: resnameExpr(ResDict.amino),
-            by: invertExpr(resnameExpr(ResDict.cyclic))
-          })
-        },
-        aliphatic: {
-          "@desc": "ALA GLY ILE LEU VAL",
-          map: () => resnameExpr(ResDict.aliphatic)
-        },
-        amino: {
-          "@desc": "all twenty standard amino acids, plus ASX, GLX, UNK",
-          map: () => resnameExpr(ResDict.amino)
-        },
-        aromatic: {
-          "@desc": 'HIS PHE TRP TYR (see also "isaromatic" for aromatic bonds)',
-          map: () => resnameExpr(ResDict.aromatic)
-        },
-        basic: {
-          "@desc": "ARG HIS LYS",
-          map: () => resnameExpr(ResDict.basic)
-        },
-        buried: {
-          "@desc": "ALA CYS ILE LEU MET PHE TRP VAL",
-          map: () => resnameExpr(ResDict.buried)
-        },
-        charged: {
-          "@desc": "same as acidic or basic -- ASP GLU, ARG HIS LYS",
-          map: () => resnameExpr(ResDict.acidic.concat(ResDict.basic))
-        },
-        cyclic: {
-          "@desc": "HIS PHE PRO TRP TYR",
-          map: () => resnameExpr(ResDict.cyclic)
-        },
-        helix: {
-          "@desc": "secondary structure-related.",
-          map: () => B4.struct.generator.atomGroups({
-            "residue-test": B4.core.flags.hasAny([
-              B4.struct.type.secondaryStructureFlags(["helix"]),
-              B4.ammp("secondaryStructureFlags")
-            ])
-          })
-        },
-        helixalpha: {
-          "@desc": "secondary structure-related.",
-          map: () => B4.struct.generator.atomGroups({
-            "residue-test": B4.core.flags.hasAny([
-              B4.struct.type.secondaryStructureFlags(["alpha"]),
-              B4.ammp("secondaryStructureFlags")
-            ])
-          })
-        },
-        helix310: {
-          "@desc": "secondary structure-related.",
-          map: () => B4.struct.generator.atomGroups({
-            "residue-test": B4.core.flags.hasAny([
-              B4.struct.type.secondaryStructureFlags(["3-10"]),
-              B4.ammp("secondaryStructureFlags")
-            ])
-          })
-        },
-        helixpi: {
-          "@desc": "secondary structure-related.",
-          map: () => B4.struct.generator.atomGroups({
-            "residue-test": B4.core.flags.hasAny([
-              B4.struct.type.secondaryStructureFlags(["pi"]),
-              B4.ammp("secondaryStructureFlags")
-            ])
-          })
-        },
-        hetero: {
-          "@desc": "PDB atoms designated as HETATM",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.ammp("isHet")
-          })
-        },
-        hydrophobic: {
-          "@desc": "ALA GLY ILE LEU MET PHE PRO TRP TYR VAL",
-          map: () => resnameExpr(ResDict.hydrophobic)
-        },
-        large: {
-          "@desc": "ARG GLU GLN HIS ILE LEU LYS MET PHE TRP TYR",
-          map: () => resnameExpr(ResDict.large)
-        },
-        medium: {
-          "@desc": "ASN ASP CYS PRO THR VAL",
-          map: () => resnameExpr(ResDict.medium)
-        },
-        negative: {
-          "@desc": "same as acidic -- ASP GLU",
-          map: () => resnameExpr(ResDict.acidic)
-        },
-        neutral: {
-          "@desc": "amino and not (acidic or basic)",
-          map: () => B4.struct.modifier.intersectBy({
-            0: resnameExpr(ResDict.amino),
-            by: invertExpr(resnameExpr(ResDict.acidic.concat(ResDict.basic)))
-          })
-        },
-        polar: {
-          "@desc": "amino and not hydrophobic",
-          map: () => B4.struct.modifier.intersectBy({
-            0: resnameExpr(ResDict.amino),
-            by: invertExpr(resnameExpr(ResDict.hydrophobic))
-          })
-        },
-        positive: {
-          "@desc": "same as basic -- ARG HIS LYS",
-          map: () => resnameExpr(ResDict.basic)
-        },
-        sheet: {
-          "@desc": "secondary structure-related",
-          map: () => B4.struct.generator.atomGroups({
-            "residue-test": B4.core.flags.hasAny([
-              B4.struct.type.secondaryStructureFlags(["sheet"]),
-              B4.ammp("secondaryStructureFlags")
-            ])
-          })
-        },
-        small: {
-          "@desc": "ALA GLY SER",
-          map: () => resnameExpr(ResDict.small)
-        },
-        surface: {
-          "@desc": "amino and not buried",
-          map: () => B4.struct.modifier.intersectBy({
-            0: resnameExpr(ResDict.amino),
-            by: invertExpr(resnameExpr(ResDict.buried))
-          })
-        },
-        turn: {
-          "@desc": "secondary structure-related",
-          map: () => B4.struct.generator.atomGroups({
-            "residue-test": B4.core.flags.hasAny([
-              B4.struct.type.secondaryStructureFlags(["turn"]),
-              B4.ammp("secondaryStructureFlags")
-            ])
-          })
-        },
-        alpha: {
-          "@desc": "(*.CA)",
-          map: () => B4.struct.generator.atomGroups({
-            "atom-test": B4.core.rel.eq([
-              B4.atomName("CA"),
-              B4.ammp("label_atom_id")
-            ])
-          })
-        },
-        base: {
-          "@desc": "(nucleic bases)"
-        },
-        backbone: {
-          "@desc": "(*.C, *.CA, *.N, and all nucleic other than the bases themselves)",
-          abbr: ["mainchain"],
-          map: () => backboneExpr()
-        },
-        sidechain: {
-          "@desc": "((protein or nucleic) and not backbone)"
-        },
-        spine: {
-          "@desc": "(*.CA, *.N, *.C for proteins; *.P, *.O3', *.O5', *.C3', *.C4', *.C5 for nucleic acids)"
-        },
-        leadatom: {
-          "@desc": "(*.CA, *.P, and terminal *.O5')"
-        },
-        solvent: {
-          "@desc": 'PDB "HOH", water, also the connected set of H-O-H in any model'
-        }
-      };
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/jmol/parser.js
-  function atomExpressionQuery(x) {
-    const [resname, resnoRange, resno, inscode, chainname, atomname, altloc] = x[1];
-    const tests = {};
-    if (chainname) {
-      tests["chain-test"] = B5.core.rel.eq([B5.ammp("auth_asym_id"), chainname]);
-    }
-    const resProps = [];
-    if (resname)
-      resProps.push(B5.core.rel.eq([B5.ammp("label_comp_id"), resname]));
-    if (resnoRange)
-      resProps.push(B5.core.logic.and([
-        B5.core.rel.gre([B5.ammp("auth_seq_id"), resnoRange[0]]),
-        B5.core.rel.lte([B5.ammp("auth_seq_id"), resnoRange[1]])
-      ]));
-    if (resno)
-      resProps.push(B5.core.rel.eq([B5.ammp("auth_seq_id"), resno]));
-    if (inscode)
-      resProps.push(B5.core.rel.eq([B5.ammp("pdbx_PDB_ins_code"), inscode]));
-    if (resProps.length)
-      tests["residue-test"] = andExpr(resProps);
-    const atomProps = [];
-    if (atomname)
-      atomProps.push(B5.core.rel.eq([B5.ammp("auth_atom_id"), atomname]));
-    if (altloc)
-      atomProps.push(B5.core.rel.eq([B5.ammp("label_alt_id"), altloc]));
-    if (atomProps.length)
-      tests["atom-test"] = andExpr(atomProps);
-    return B5.struct.generator.atomGroups(tests);
-  }
-  var B5, valueOperators, lang, transpiler;
-  var init_parser16 = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/jmol/parser.js"() {
-      init_monadic_parser();
-      init_helper();
-      init_builder();
-      init_properties3();
-      init_operators();
-      init_keywords();
-      B5 = MolScriptBuilder;
-      valueOperators = [
-        {
-          "@desc": "value comparisons",
-          "@examples": [],
-          name: "=",
-          abbr: ["=="],
-          type: binaryLeft,
-          rule: MonadicParser.regexp(/\s*(LIKE|>=|<=|=|!=|>|<)\s*/i, 1),
-          map: (op2, e1, e2) => {
-            let expr;
-            if (e1 === "structure") {
-              expr = B5.core.flags.hasAny([B5.ammp("secondaryStructureFlags"), structureMap(e2)]);
-            } else if (e2 === "structure") {
-              expr = B5.core.flags.hasAny([B5.ammp("secondaryStructureFlags"), structureMap(e1)]);
-            } else if (e1.head !== void 0) {
-              if (e1.head.name === "core.type.regex") {
-                expr = B5.core.str.match([e1, B5.core.type.str([e2])]);
-              }
-            } else if (e2.head !== void 0) {
-              if (e2.head.name === "core.type.regex") {
-                expr = B5.core.str.match([e2, B5.core.type.str([e1])]);
-              }
-            } else if (op2.toUpperCase() === "LIKE") {
-              if (e1.head) {
-                expr = B5.core.str.match([
-                  B5.core.type.regex([`^${e2}$`, "i"]),
-                  B5.core.type.str([e1])
-                ]);
-              } else {
-                expr = B5.core.str.match([
-                  B5.core.type.regex([`^${e1}$`, "i"]),
-                  B5.core.type.str([e2])
-                ]);
-              }
-            }
-            if (!expr) {
-              if (e1.head)
-                e2 = wrapValue(e1, e2);
-              if (e2.head)
-                e1 = wrapValue(e2, e1);
-              switch (op2) {
-                case "=":
-                  expr = B5.core.rel.eq([e1, e2]);
-                  break;
-                case "!=":
-                  expr = B5.core.rel.neq([e1, e2]);
-                  break;
-                case ">":
-                  expr = B5.core.rel.gr([e1, e2]);
-                  break;
-                case "<":
-                  expr = B5.core.rel.lt([e1, e2]);
-                  break;
-                case ">=":
-                  expr = B5.core.rel.gre([e1, e2]);
-                  break;
-                case "<=":
-                  expr = B5.core.rel.lte([e1, e2]);
-                  break;
-                default:
-                  throw new Error(`value operator '${op2}' not supported`);
-              }
-            }
-            return B5.struct.generator.atomGroups({ "atom-test": expr });
-          }
-        }
-      ];
-      lang = MonadicParser.createLanguage({
-        Integer: () => MonadicParser.regexp(/-?[0-9]+/).map(Number).desc("integer"),
-        Parens: function(r) {
-          return MonadicParser.alt(r.Parens, r.Operator, r.Expression).wrap(MonadicParser.regexp(/\(\s*/), MonadicParser.regexp(/\s*\)/));
-        },
-        Expression: function(r) {
-          return MonadicParser.alt(r.Keywords, r.AtomExpression.map(atomExpressionQuery), r.Within.map((x) => B5.struct.modifier.includeSurroundings({ 0: x[1], radius: x[0] })), r.ValueQuery, r.Element.map((x) => B5.struct.generator.atomGroups({
-            "atom-test": B5.core.rel.eq([B5.acp("elementSymbol"), B5.struct.type.elementSymbol(x)])
-          })), r.Resname.map((x) => B5.struct.generator.atomGroups({
-            "residue-test": B5.core.rel.eq([B5.ammp("label_comp_id"), x])
-          })));
-        },
-        Operator: function(r) {
-          return combineOperators(operators, MonadicParser.alt(r.Parens, r.Expression));
-        },
-        AtomExpression: function(r) {
-          return MonadicParser.seq(MonadicParser.lookahead(r.AtomPrefix), MonadicParser.seq(r.BracketedResname.or(MonadicParser.of(null)), r.ResnoRange.or(MonadicParser.of(null)), r.Resno.or(MonadicParser.of(null)), r.Inscode.or(MonadicParser.of(null)), r.Chainname.or(MonadicParser.of(null)), r.Atomname.or(MonadicParser.of(null)), r.Altloc.or(MonadicParser.of(null)), r.Model.or(MonadicParser.of(null)))).desc("expression");
-        },
-        AtomPrefix: () => MonadicParser.regexp(/[\[0-9:^%/.-]/).desc("atom-prefix"),
-        Chainname: () => MonadicParser.regexp(/:([A-Za-z]{1,3})/, 1).desc("chainname"),
-        Model: () => MonadicParser.regexp(/\/([0-9]+)/, 1).map(Number).desc("model"),
-        Element: () => MonadicParser.regexp(/_([A-Za-z]{1,3})/, 1).desc("element"),
-        Atomname: () => MonadicParser.regexp(/\.([a-zA-Z0-9]{1,4})/, 1).map(B5.atomName).desc("atomname"),
-        Resname: () => MonadicParser.regexp(/[a-zA-Z0-9]{1,4}/).desc("resname"),
-        Resno: (r) => r.Integer.desc("resno"),
-        Altloc: () => MonadicParser.regexp(/%([a-zA-Z0-9])/, 1).desc("altloc"),
-        Inscode: () => MonadicParser.regexp(/\^([a-zA-Z0-9])/, 1).desc("inscode"),
-        BracketedResname: () => MonadicParser.regexp(/\[([a-zA-Z0-9]{1,4})\]/, 1).desc("bracketed-resname"),
-        ResnoRange: (r) => {
-          return MonadicParser.seq(r.Integer.skip(MonadicParser.seq(MonadicParser.optWhitespace, MonadicParser.string("-"), MonadicParser.optWhitespace)), r.Integer).desc("resno-range");
-        },
-        Within: (r) => {
-          return MonadicParser.regexp(/within/i).skip(MonadicParser.regexp(/\s*\(\s*/)).then(MonadicParser.seq(r.Integer.skip(MonadicParser.regexp(/\s*,\s*/)), r.Query)).skip(MonadicParser.regexp(/\)/));
-        },
-        Keywords: () => MonadicParser.alt(...getKeywordRules(keywords)).desc("keyword"),
-        Query: function(r) {
-          return MonadicParser.alt(r.Operator, r.Parens, r.Expression).trim(MonadicParser.optWhitespace);
-        },
-        Number: function() {
-          return MonadicParser.regexp(/-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?/).map(Number).desc("number");
-        },
-        String: function() {
-          const w = getReservedWords(properties, keywords, operators).sort(strLenSortFn).map(escapeRegExp).join("|");
-          return MonadicParser.alt(MonadicParser.regexp(new RegExp(`(?!(${w}))[A-Z0-9_]+`, "i")), MonadicParser.regexp(/'((?:[^"\\]|\\.)*)'/, 1), MonadicParser.regexp(/"((?:[^"\\]|\\.)*)"/, 1).map((x) => B5.core.type.regex([`^${x}$`, "i"]))).desc("string");
-        },
-        Value: function(r) {
-          return MonadicParser.alt(r.Number, r.String);
-        },
-        ValueParens: function(r) {
-          return MonadicParser.alt(r.ValueParens, r.ValueOperator, r.ValueExpressions).wrap(MonadicParser.string("("), MonadicParser.string(")"));
-        },
-        ValuePropertyNames: function() {
-          return MonadicParser.alt(...getPropertyNameRules(properties, /LIKE|>=|<=|=|!=|>|<|\)|\s/i));
-        },
-        ValueOperator: function(r) {
-          return combineOperators(valueOperators, MonadicParser.alt(r.ValueParens, r.ValueExpressions));
-        },
-        ValueExpressions: function(r) {
-          return MonadicParser.alt(r.Value, r.ValuePropertyNames);
-        },
-        ValueQuery: function(r) {
-          return MonadicParser.alt(r.ValueOperator.map((x) => {
-            if (x.head) {
-              if (x.head.name.startsWith("structure-query.generator"))
-                return x;
-            } else {
-              if (typeof x === "string" && x.length <= 4) {
-                return B5.struct.generator.atomGroups({
-                  "residue-test": B5.core.rel.eq([B5.ammp("label_comp_id"), x])
-                });
-              }
-            }
-            throw new Error(`values must be part of an comparison, value '${x}'`);
-          }));
-        }
-      });
-      transpiler = (str11) => lang.Query.tryParse(str11);
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/pymol/properties.js
-  function atomNameListMap(x) {
-    return x.split("+").map(B6.atomName);
-  }
-  function listMap(x) {
-    return x.split("+").map((x2) => x2.replace(/^["']|["']$/g, ""));
-  }
-  function listOrRangeMap(x) {
-    if (x.includes("-") && x.includes("+")) {
-      const pSplit = x.split("+").map((x2) => x2.replace(/^["']|["']$/g, ""));
-      const res = [];
-      pSplit.forEach((x2) => {
-        if (x2.includes("-") && !x2.startsWith("-")) {
-          const [min5, max5] = x2.split("-").map((x3) => parseInt(x3));
-          for (let i = min5; i <= max5; i++) {
-            res.push(i);
-          }
-        } else if (x2.includes("-") && x2.startsWith("-") && x2.match(/[0-9]+-[-0-9]+/)) {
-          const min5 = -parseInt(x2.split("-")[1]);
-          let max5;
-          if (x2.includes("--")) {
-            max5 = -parseInt(x2.split("-")[3]);
-          } else {
-            max5 = parseInt(x2.split("-")[2]);
-          }
-          for (let i = min5; i <= max5; i++) {
-            res.push(i);
-          }
-        } else if (x2.includes("-") && x2.startsWith("-") && !x2.match(/[0-9]+-[-0-9]+/)) {
-          res.push(parseInt(x2));
-        } else {
-          res.push(parseInt(x2));
-        }
-      });
-      return res;
-    } else if (x.includes("-") && !x.includes("+")) {
-      const res = [];
-      if (!x.startsWith("-")) {
-        const [min5, max5] = x.split("-").map((x2) => parseInt(x2));
-        for (let i = min5; i <= max5; i++) {
-          res.push(i);
-        }
-      } else if (x.startsWith("-") && x.match(/[0-9]+-[-0-9]+/)) {
-        const min5 = -parseInt(x.split("-")[1]);
-        let max5;
-        if (x.includes("--")) {
-          max5 = -parseInt(x.split("-")[3]);
-        } else {
-          max5 = parseInt(x.split("-")[2]);
-        }
-        for (let i = min5; i <= max5; i++) {
-          res.push(i);
-        }
-      } else if (x.startsWith("-") && !x.match(/[0-9]+-[-0-9]+/)) {
-        res.push(parseInt(x));
-      } else {
-        res.push(parseInt(x));
-      }
-      return res;
-    } else if (!x.includes("-") && x.includes("+")) {
-      return listMap(x).map((x2) => parseInt(x2));
-    } else {
-      return [parseInt(x)];
-    }
-  }
-  function elementListMap(x) {
-    return x.split("+").map(B6.struct.type.elementSymbol);
-  }
-  function sstrucListMap(x) {
-    return {
-      flags: B6.struct.type.secondaryStructureFlags(x.toUpperCase().split("+").map((ss) => sstrucDict[ss] || "none"))
-    };
-  }
-  var B6, reFloat2, sstrucDict, properties2;
-  var init_properties4 = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/pymol/properties.js"() {
-      init_builder();
-      B6 = MolScriptBuilder;
-      reFloat2 = /[-+]?[0-9]*\.?[0-9]+/;
-      sstrucDict = {
-        H: "helix",
-        S: "beta",
-        L: "none"
-      };
-      properties2 = {
-        symbol: {
-          "@desc": "chemical-symbol-list: list of 1- or 2-letter chemical symbols from the periodic table",
-          "@examples": ["symbol O+N"],
-          abbr: ["e."],
-          regex: /[a-zA-Z'"+]+/,
-          map: elementListMap,
-          level: "atom-test",
-          property: B6.acp("elementSymbol")
-        },
-        name: {
-          "@desc": "atom-name-list: list of up to 4-letter codes for atoms in proteins or nucleic acids",
-          "@examples": ["name CA+CB+CG+CD"],
-          abbr: ["n."],
-          regex: /[a-zA-Z0-9'"+]+/,
-          map: atomNameListMap,
-          level: "atom-test",
-          property: B6.ammp("label_atom_id")
-        },
-        resn: {
-          "@desc": "residue-name-list: list of 3-letter codes for amino acids or list of up to 2-letter codes for nucleic acids",
-          "@examples": ["resn ASP+GLU+ASN+GLN", "resn A+G"],
-          abbr: ["resname", "r."],
-          regex: /[a-zA-Z0-9'"+]+/,
-          map: listMap,
-          level: "residue-test",
-          property: B6.ammp("label_comp_id")
-        },
-        resi: {
-          "@desc": "residue-identifier-list list of up to 4-digit residue numbers or residue-identifier-range",
-          "@examples": ["resi 1+10+100+1000", "resi 1-10"],
-          abbr: ["resident", "residue", "resid", "i."],
-          regex: /[0-9+-]+/,
-          map: listOrRangeMap,
-          level: "residue-test",
-          property: B6.ammp("auth_seq_id")
-        },
-        alt: {
-          "@desc": "alternate-conformation-identifier-list list of single letters",
-          "@examples": ["alt A+B", 'alt ""', 'alt ""+A'],
-          abbr: [],
-          regex: /[a-zA-Z0-9'"+]+/,
-          map: listMap,
-          level: "atom-test",
-          property: B6.ammp("label_alt_id")
-        },
-        chain: {
-          "@desc": "chain-identifier-list list of single letters or sometimes numbers",
-          "@examples": ["chain A"],
-          abbr: ["c."],
-          regex: /[a-zA-Z0-9'"+]+/,
-          map: listMap,
-          level: "chain-test",
-          property: B6.ammp("auth_asym_id")
-        },
-        segi: {
-          "@desc": "segment-identifier-list list of up to 4 letter identifiers",
-          "@examples": ["segi lig"],
-          abbr: ["segid", "s."],
-          regex: /[a-zA-Z0-9'"+]+/,
-          map: listMap,
-          level: "chain-test",
-          property: B6.ammp("label_asym_id")
-        },
-        flag: {
-          "@desc": "flag-number a single integer from 0 to 31",
-          "@examples": ["flag 0"],
-          isUnsupported: true,
-          abbr: ["f."],
-          regex: /[0-9]+/,
-          map: (x) => parseInt(x),
-          level: "atom-test"
-        },
-        numeric_type: {
-          "@desc": "type-number a single integer",
-          "@examples": ["nt. 5"],
-          isUnsupported: true,
-          abbr: ["nt."],
-          regex: /[0-9]+/,
-          map: (x) => parseInt(x),
-          level: "atom-test"
-        },
-        text_type: {
-          "@desc": "type-string a list of up to 4 letter codes",
-          "@examples": ["text_type HA+HC"],
-          isUnsupported: true,
-          abbr: ["tt."],
-          regex: /[a-zA-Z0-9'"+]+/,
-          map: listMap,
-          level: "atom-test"
-        },
-        id: {
-          "@desc": "external-index-number a single integer",
-          "@examples": ["id 23"],
-          regex: /[0-9+-]+/,
-          map: listOrRangeMap,
-          level: "atom-test",
-          property: B6.ammp("id")
-        },
-        index: {
-          "@desc": "internal-index-number a single integer",
-          "@examples": ["index 11"],
-          regex: /[0-9+-]+/,
-          map: listOrRangeMap,
-          level: "atom-test",
-          property: B6.ammp("id")
-        },
-        ss: {
-          "@desc": "secondary-structure-type list of single letters. Helical regions should be assigned H and sheet regions S. Loop regions can either be assigned L or be blank.",
-          "@examples": ["ss H+S+L", 'ss S+""'],
-          abbr: [],
-          regex: /[a-zA-Z'"+]+/,
-          map: sstrucListMap,
-          level: "residue-test",
-          property: B6.ammp("secondaryStructureFlags")
-        },
-        b: {
-          "@desc": "comparison-operator b-factor-value a real number",
-          "@examples": ["b > 10"],
-          isNumeric: true,
-          abbr: [],
-          regex: reFloat2,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B6.ammp("B_iso_or_equiv")
-        },
-        q: {
-          "@desc": "comparison-operator occupancy-value a real number",
-          "@examples": ["q <0.50"],
-          isNumeric: true,
-          abbr: [],
-          regex: reFloat2,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B6.ammp("occupancy")
-        },
-        formal_charge: {
-          "@desc": "comparison-operator formal charge-value an integer",
-          "@examples": ["fc. = -1"],
-          isNumeric: true,
-          abbr: ["fc."],
-          regex: reFloat2,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B6.ammp("pdbx_formal_charge")
-        },
-        partial_charge: {
-          "@desc": "comparison-operator partial charge-value a real number",
-          "@examples": ["pc. > 1"],
-          isUnsupported: true,
-          isNumeric: true,
-          abbr: ["pc."],
-          regex: reFloat2,
-          map: (x) => parseFloat(x),
-          level: "atom-test"
-        },
-        elem: {
-          "@desc": 'str  atomic element symbol string ("X" if undefined)',
-          "@examples": ["elem N"],
-          regex: /[a-zA-Z0-9]{1,3}/,
-          map: (x) => B6.es(x),
-          level: "atom-test",
-          property: B6.acp("elementSymbol")
-        }
-      };
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/pymol/operators.js
-  var B7, operators2;
-  var init_operators2 = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/pymol/operators.js"() {
-      init_monadic_parser();
-      init_helper();
-      init_builder();
-      B7 = MolScriptBuilder;
-      operators2 = [
-        {
-          "@desc": "Selects atoms that are not included in s1.",
-          "@examples": [
-            "NOT resn ALA",
-            "not (resi 42 or chain A)",
-            "!resi 42 or chain A"
-          ],
-          name: "not",
-          type: prefix,
-          rule: MonadicParser.alt(MonadicParser.regexp(/NOT/i).skip(MonadicParser.whitespace), MonadicParser.string("!").skip(MonadicParser.optWhitespace)),
-          map: (op2, selection) => invertExpr(selection)
-        },
-        {
-          "@desc": "Selects atoms included in both s1 and s2.",
-          "@examples": ["chain A AND name CA"],
-          name: "and",
-          type: binaryLeft,
-          rule: infixOp(/AND|&/i),
-          map: (op2, selection, by) => B7.struct.modifier.intersectBy({ 0: selection, by })
-        },
-        {
-          "@desc": "Selects atoms included in either s1 or s2.",
-          "@examples": ["chain A OR chain B"],
-          name: "or",
-          type: binaryLeft,
-          rule: infixOp(/OR|\|/i),
-          map: (op2, s1, s2) => B7.struct.combinator.merge([s1, s2])
-        },
-        {
-          "@desc": "Selects atoms in s1 whose identifiers name, resi, resn, chain and segi all match atoms in s2.",
-          "@examples": ["chain A IN chain B"],
-          name: "in",
-          type: binaryLeft,
-          rule: infixOp(/IN/i),
-          map: (op2, selection, source) => {
-            return B7.struct.filter.withSameAtomProperties({
-              0: selection,
-              source,
-              property: B7.core.type.compositeKey([
-                B7.ammp("label_atom_id"),
-                B7.ammp("label_seq_id"),
-                B7.ammp("label_comp_id"),
-                B7.ammp("auth_asym_id"),
-                B7.ammp("label_asym_id")
-              ])
-            });
-          }
-        },
-        {
-          "@desc": "Selects atoms in s1 whose identifiers name and resi match atoms in s2.",
-          "@examples": ["chain A LIKE chain B"],
-          name: "like",
-          type: binaryLeft,
-          rule: infixOp(/LIKE|l\./i),
-          map: (op2, selection, source) => {
-            return B7.struct.filter.withSameAtomProperties({
-              0: selection,
-              source,
-              property: B7.core.type.compositeKey([
-                B7.ammp("label_atom_id"),
-                B7.ammp("label_seq_id")
-              ])
-            });
-          }
-        },
-        {
-          "@desc": "Selects all atoms whose van der Waals radii are separated from the van der Waals radii of s1 by a minimum of X Angstroms.",
-          "@examples": ["solvent GAP 2"],
-          name: "gap",
-          type: postfix,
-          rule: postfixOp(/GAP\s+([-+]?[0-9]*\.?[0-9]+)/i, 1).map((x) => parseFloat(x)),
-          map: (distance, target) => {
-            return B7.struct.filter.within({
-              "0": B7.struct.generator.all(),
-              target,
-              "atom-radius": B7.acp("vdw"),
-              "max-radius": distance,
-              invert: true
-            });
-          }
-        },
-        {
-          "@desc": "Selects atoms with centers within X Angstroms of the center of any atom in s1.",
-          "@examples": ["resname LIG AROUND 1"],
-          name: "around",
-          abbr: ["a."],
-          type: postfix,
-          rule: postfixOp(/(AROUND|a\.)\s+([-+]?[0-9]*\.?[0-9]+)/i, 2).map((x) => parseFloat(x)),
-          map: (radius, target) => {
-            return B7.struct.modifier.exceptBy({
-              "0": B7.struct.filter.within({
-                "0": B7.struct.generator.all(),
-                target,
-                "max-radius": radius
-              }),
-              by: target
-            });
-          }
-        },
-        {
-          "@desc": "Expands s1 by all atoms within X Angstroms of the center of any atom in s1.",
-          "@examples": ["chain A EXPAND 3"],
-          name: "expand",
-          abbr: ["x."],
-          type: postfix,
-          rule: postfixOp(/(EXPAND|x\.)\s+([-+]?[0-9]*\.?[0-9]+)/i, 2).map((x) => parseFloat(x)),
-          map: (radius, selection) => {
-            return B7.struct.modifier.includeSurroundings({ 0: selection, radius });
-          }
-        },
-        {
-          "@desc": "Selects atoms in s1 that are within X Angstroms of any atom in s2.",
-          "@examples": ["chain A WITHIN 3 OF chain B"],
-          name: "within",
-          abbr: ["w."],
-          type: binaryLeft,
-          rule: ofOp("WITHIN", "w."),
-          map: (radius, selection, target) => {
-            return B7.struct.filter.within({
-              0: selection,
-              target,
-              "max-radius": radius
-            });
-          }
-        },
-        {
-          "@desc": "Same as within, but excludes s2 from the selection (and thus is identical to s1 and s2 around X).",
-          "@examples": ["chain A NEAR_TO 3 OF chain B"],
-          name: "near_to",
-          abbr: ["nto."],
-          type: binaryLeft,
-          rule: ofOp("NEAR_TO", "nto."),
-          map: (radius, selection, target) => {
-            return B7.struct.modifier.exceptBy({
-              "0": B7.struct.filter.within({
-                "0": selection,
-                target,
-                "max-radius": radius
-              }),
-              by: target
-            });
-          }
-        },
-        {
-          "@desc": "Selects atoms in s1 that are at least X Anstroms away from s2.",
-          "@examples": ["solvent BEYOND 2 OF chain A"],
-          name: "beyond",
-          abbr: ["be."],
-          type: binaryLeft,
-          rule: ofOp("BEYOND", "be."),
-          map: (radius, selection, target) => {
-            return B7.struct.modifier.exceptBy({
-              "0": B7.struct.filter.within({
-                "0": selection,
-                target,
-                "max-radius": radius,
-                invert: true
-              }),
-              by: target
-            });
-          }
-        },
-        {
-          "@desc": "Expands selection to complete residues.",
-          "@examples": ["BYRESIDUE name N"],
-          name: "byresidue",
-          abbr: ["byresi", "byres", "br."],
-          type: prefix,
-          rule: prefixOp(/BYRESIDUE|byresi|byres|br\./i),
-          map: (op2, selection) => {
-            return asAtoms(B7.struct.modifier.expandProperty({
-              "0": B7.struct.modifier.union({ 0: selection }),
-              property: B7.ammp("residueKey")
-            }));
-          }
-        },
-        {
-          "@desc": "Completely selects all alpha carbons in all residues covered by a selection.",
-          "@examples": ["BYCALPHA chain A"],
-          name: "bycalpha",
-          abbr: ["bca."],
-          type: prefix,
-          rule: prefixOp(/BYCALPHA|bca\./i),
-          map: (op2, selection) => {
-            return B7.struct.generator.queryInSelection({
-              "0": B7.struct.modifier.expandProperty({
-                "0": B7.struct.modifier.union({ 0: selection }),
-                property: B7.ammp("residueKey")
-              }),
-              query: B7.struct.generator.atomGroups({
-                "atom-test": B7.core.rel.eq([
-                  B7.atomName("CA"),
-                  B7.ammp("label_atom_id")
-                ])
-              })
-            });
-          }
-        },
-        {
-          "@desc": "Expands selection to complete molecules.",
-          "@examples": ["BYMOLECULE resi 20-30"],
-          name: "bymolecule",
-          isUnsupported: true,
-          // structure-query.atom-property.topology.connected-component-key' is not implemented
-          abbr: ["bymol", "bm."],
-          type: prefix,
-          rule: prefixOp(/BYMOLECULE|bymol|bm\./i),
-          map: (op2, selection) => {
-            return asAtoms(B7.struct.modifier.expandProperty({
-              "0": B7.struct.modifier.union({ 0: selection }),
-              property: B7.atp("connectedComponentKey")
-            }));
-          }
-        },
-        {
-          "@desc": "Expands selection to complete fragments.",
-          "@examples": ["BYFRAGMENT resi 10"],
-          name: "byfragment",
-          abbr: ["byfrag", "bf."],
-          isUnsupported: true,
-          type: prefix,
-          rule: prefixOp(/BYFRAGMENT|byfrag|bf\./i),
-          map: (op2, selection) => [op2, selection]
-        },
-        {
-          "@desc": "Expands selection to complete segments.",
-          "@examples": ["BYSEGMENT resn CYS"],
-          name: "bysegment",
-          abbr: ["bysegi", "byseg", "bs."],
-          type: prefix,
-          rule: prefixOp(/BYSEGMENT|bysegi|byseg|bs\./i),
-          map: (op2, selection) => {
-            return asAtoms(B7.struct.modifier.expandProperty({
-              "0": B7.struct.modifier.union({ 0: selection }),
-              property: B7.ammp("chainKey")
-            }));
-          }
-        },
-        {
-          "@desc": "Expands selection to complete objects.",
-          "@examples": ["BYOBJECT chain A"],
-          name: "byobject",
-          abbr: ["byobj", "bo."],
-          isUnsupported: true,
-          type: prefix,
-          rule: prefixOp(/BYOBJECT|byobj|bo\./i),
-          map: (op2, selection) => [op2, selection]
-        },
-        {
-          "@desc": "Expands selection to unit cell.",
-          "@examples": ["BYCELL chain A"],
-          name: "bycell",
-          isUnsupported: true,
-          type: prefix,
-          rule: prefixOp(/BYCELL/i),
-          map: (op2, selection) => [op2, selection]
-        },
-        {
-          "@desc": "All rings of size \u2264 7 which have at least one atom in s1.",
-          "@examples": ["BYRING resn HEM"],
-          name: "byring",
-          // isUnsupported: true, // structure-query.atom-set.atom-count' is not implemented.
-          type: prefix,
-          rule: prefixOp(/BYRING/i),
-          map: (op2, selection) => {
-            return asAtoms(B7.struct.modifier.intersectBy({
-              "0": B7.struct.filter.pick({
-                "0": B7.struct.generator.rings(),
-                test: B7.core.logic.and([
-                  B7.core.rel.lte([B7.struct.atomSet.atomCount(), 7]),
-                  B7.core.rel.gr([B7.struct.atomSet.countQuery([selection]), 1])
-                ])
-              }),
-              by: selection
-            }));
-          }
-        },
-        {
-          "@desc": "Selects atoms directly bonded to s1, excludes s1.",
-          "@examples": ["NEIGHBOR resn CYS"],
-          name: "neighbor",
-          type: prefix,
-          abbr: ["nbr."],
-          rule: prefixOp(/NEIGHBOR|nbr\./i),
-          map: (op2, selection) => {
-            return B7.struct.modifier.exceptBy({
-              "0": asAtoms(B7.struct.modifier.includeConnected({
-                "0": B7.struct.modifier.union({ 0: selection }),
-                "bond-test": true
-              })),
-              by: selection
-            });
-          }
-        },
-        {
-          "@desc": "Selects atoms directly bonded to s1, may include s1.",
-          "@examples": ["BOUND_TO name CA"],
-          name: "bound_to",
-          abbr: ["bto."],
-          type: prefix,
-          rule: prefixOp(/BOUND_TO|bto\./i),
-          map: (op2, selection) => {
-            return asAtoms(B7.struct.modifier.includeConnected({
-              "0": B7.struct.modifier.union({ 0: selection })
-            }));
-          }
-        },
-        {
-          "@desc": "Extends s1 by X bonds connected to atoms in s1.",
-          "@examples": ["resname LIG EXTEND 3"],
-          name: "extend",
-          abbr: ["xt."],
-          type: postfix,
-          rule: postfixOp(/(EXTEND|xt\.)\s+([0-9]+)/i, 2).map((x) => parseInt(x)),
-          map: (count3, selection) => {
-            return asAtoms(B7.struct.modifier.includeConnected({
-              "0": B7.struct.modifier.union({ 0: selection }),
-              "bond-test": true,
-              "layer-count": count3
-            }));
-          }
-        }
-      ];
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/pymol/keywords.js
-  function backboneExpr2() {
-    return B8.struct.combinator.merge([
-      B8.struct.modifier.intersectBy({
-        0: B8.struct.generator.atomGroups({
-          "residue-test": B8.core.set.has([
-            B8.core.type.set(ResDict2.protein),
-            B8.ammp("label_comp_id")
-          ])
-        }),
-        by: B8.struct.generator.atomGroups({
-          "atom-test": B8.core.set.has([
-            B8.core.type.set(Backbone2.protein),
-            B8.ammp("label_atom_id")
-          ])
-        })
-      }),
-      B8.struct.modifier.intersectBy({
-        0: B8.struct.generator.atomGroups({
-          "residue-test": B8.core.set.has([
-            B8.core.type.set(ResDict2.nucleic),
-            B8.ammp("label_comp_id")
-          ])
-        }),
-        by: B8.struct.generator.atomGroups({
-          "atom-test": B8.core.set.has([
-            B8.core.type.set(Backbone2.nucleic),
-            B8.ammp("label_atom_id")
-          ])
-        })
-      })
-    ]);
-  }
-  var B8, ResDict2, Backbone2, keywords2;
-  var init_keywords2 = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/pymol/keywords.js"() {
-      init_builder();
-      init_helper();
-      B8 = MolScriptBuilder;
-      ResDict2 = {
-        nucleic: ["A", "C", "T", "G", "U", "DA", "DC", "DT", "DG", "DU"],
-        protein: ["ALA", "ARG", "ASN", "ASP", "CYS", "CYX", "GLN", "GLU", "GLY", "HIS", "HID", "HIE", "HIP", "ILE", "LEU", "LYS", "MET", "MSE", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL"],
-        solvent: ["HOH", "WAT", "H20", "TIP", "SOL"]
-      };
-      Backbone2 = {
-        nucleic: [
-          "P",
-          "O3'",
-          "O5'",
-          "C5'",
-          "C4'",
-          "C3'",
-          "OP1",
-          "OP2",
-          "O3*",
-          "O5*",
-          "C5*",
-          "C4*",
-          "C3*",
-          "C2'",
-          "C1'",
-          "O4'",
-          "O2'"
-        ],
-        protein: ["C", "N", "CA", "O"]
-      };
-      keywords2 = {
-        all: {
-          "@desc": "All atoms currently loaded into PyMOL",
-          abbr: ["*"],
-          map: () => B8.struct.generator.all()
-        },
-        none: {
-          "@desc": "No atoms (empty selection)",
-          map: () => B8.struct.generator.empty()
-        },
-        hydrogens: {
-          "@desc": "All hydrogen atoms currently loaded into PyMOL",
-          abbr: ["hydro", "h."],
-          map: () => B8.struct.generator.atomGroups({
-            "atom-test": B8.core.rel.eq([
-              B8.acp("elementSymbol"),
-              B8.es("H")
-            ])
-          })
-        },
-        hetatm: {
-          "@desc": "All atoms loaded from Protein Data Bank HETATM records",
-          abbr: ["het"],
-          map: () => B8.struct.generator.atomGroups({
-            "atom-test": B8.core.rel.eq([B8.ammp("isHet"), true])
-          })
-        },
-        visible: {
-          "@desc": "All atoms in enabled objects with at least one visible representation",
-          abbr: ["v."]
-        },
-        polymer: {
-          "@desc": "All atoms on the polymer (not het). Finds atoms with residue identifiers matching a known polymer, such a peptide and DNA.",
-          abbr: ["pol."],
-          map: () => B8.struct.generator.atomGroups({
-            "residue-test": B8.core.set.has([
-              B8.core.type.set(ResDict2.nucleic.concat(ResDict2.protein)),
-              B8.ammp("label_comp_id")
-            ])
-          })
-        },
-        sidechain: {
-          "@desc": "Polymer non-backbone atoms (new in PyMOL 1.6.1)",
-          abbr: ["sc."],
-          map: () => {
-            return B8.struct.modifier.exceptBy({
-              "0": B8.struct.generator.atomGroups({
-                "residue-test": B8.core.set.has([
-                  B8.core.type.set(ResDict2.nucleic.concat(ResDict2.protein)),
-                  B8.ammp("label_comp_id")
-                ])
-              }),
-              by: backboneExpr2()
-            });
-          }
-        },
-        present: {
-          "@desc": "All atoms with defined coordinates in the current state (used in creating movies)",
-          abbr: ["pr."]
-        },
-        center: {
-          "@desc": "Pseudo-atom at the center of the scene"
-        },
-        origin: {
-          "@desc": "Pseudo-atom at the origin of rotation"
-        },
-        enabled: {
-          "@desc": "All enabled objects or selections from the object list."
-        },
-        masked: {
-          "@desc": "All masked atoms.",
-          abbr: ["msk."]
-        },
-        protected: {
-          "@desc": "All protected atoms.",
-          abbr: ["pr."]
-        },
-        bonded: {
-          "@desc": "All bonded atoms",
-          map: () => B8.struct.generator.atomGroups({
-            "atom-test": B8.core.rel.gr([B8.struct.atomProperty.core.bondCount({
-              flags: B8.struct.type.bondFlags(["covalent", "metallic", "sulfide"])
-            }), 0])
-          })
-        },
-        donors: {
-          "@desc": "All hydrogen bond donor atoms.",
-          abbr: ["don."]
-        },
-        acceptors: {
-          "@desc": "All hydrogen bond acceptor atoms.",
-          abbr: ["acc."]
-        },
-        fixed: {
-          "@desc": "All fixed atoms.",
-          abbr: ["fxd."]
-        },
-        restrained: {
-          "@desc": "All restrained atoms.",
-          abbr: ["rst."]
-        },
-        organic: {
-          "@desc": "All atoms in non-polymer organic compounds (e.g. ligands, buffers). Finds carbon-containing molecules that do not match known polymers.",
-          abbr: ["org."],
-          map: () => asAtoms(B8.struct.modifier.expandProperty({
-            "0": B8.struct.modifier.union([
-              B8.struct.generator.queryInSelection({
-                "0": B8.struct.generator.atomGroups({
-                  "residue-test": B8.core.logic.not([
-                    B8.core.set.has([
-                      B8.core.type.set(ResDict2.nucleic.concat(ResDict2.protein)),
-                      B8.ammp("label_comp_id")
-                    ])
-                  ])
-                }),
-                query: B8.struct.generator.atomGroups({
-                  "atom-test": B8.core.rel.eq([
-                    B8.es("C"),
-                    B8.acp("elementSymbol")
-                  ])
-                })
-              })
-            ]),
-            property: B8.ammp("residueKey")
-          }))
-        },
-        inorganic: {
-          "@desc": "All non-polymer inorganic atoms/ions. Finds atoms in molecules that do not contain carbon and do not match any known solvent residues.",
-          abbr: ["ino."],
-          map: () => asAtoms(B8.struct.modifier.expandProperty({
-            "0": B8.struct.modifier.union([
-              B8.struct.filter.pick({
-                "0": B8.struct.generator.atomGroups({
-                  "residue-test": B8.core.logic.not([
-                    B8.core.set.has([
-                      B8.core.type.set(ResDict2.nucleic.concat(ResDict2.protein).concat(ResDict2.solvent)),
-                      B8.ammp("label_comp_id")
-                    ])
-                  ]),
-                  "group-by": B8.ammp("residueKey")
-                }),
-                test: B8.core.logic.not([
-                  B8.core.set.has([
-                    B8.struct.atomSet.propertySet([B8.acp("elementSymbol")]),
-                    B8.es("C")
-                  ])
-                ])
-              })
-            ]),
-            property: B8.ammp("residueKey")
-          }))
-        },
-        solvent: {
-          "@desc": "All water molecules. The hardcoded solvent residue identifiers are currently: HOH, WAT, H20, TIP, SOL.",
-          abbr: ["sol."],
-          map: () => B8.struct.generator.atomGroups({
-            "residue-test": B8.core.set.has([
-              B8.core.type.set(ResDict2.solvent),
-              B8.ammp("label_comp_id")
-            ])
-          })
-        },
-        guide: {
-          "@desc": "All protein CA and nucleic acid C4*/C4",
-          map: () => B8.struct.combinator.merge([
-            B8.struct.generator.atomGroups({
-              "atom-test": B8.core.rel.eq([
-                B8.atomName("CA"),
-                B8.ammp("label_atom_id")
-              ]),
-              "residue-test": B8.core.set.has([
-                B8.core.type.set(ResDict2.protein),
-                B8.ammp("label_comp_id")
-              ])
-            }),
-            B8.struct.generator.atomGroups({
-              "atom-test": B8.core.set.has([
-                atomNameSet(["C4*", "C4'"]),
-                B8.ammp("label_atom_id")
-              ]),
-              "residue-test": B8.core.set.has([
-                B8.core.type.set(ResDict2.nucleic),
-                B8.ammp("label_comp_id")
-              ])
-            })
-          ])
-        },
-        metals: {
-          "@desc": "All metal atoms (new in PyMOL 1.6.1)"
-        },
-        backbone: {
-          "@desc": "Polymer backbone atoms (new in PyMOL 1.6.1)",
-          abbr: ["bb."],
-          map: () => backboneExpr2()
-        },
-        "polymer.protein": {
-          "@desc": "Protein (New in PyMOL 2.1)",
-          abbr: ["polymer.protein"],
-          map: () => B8.struct.generator.atomGroups({
-            "residue-test": B8.core.set.has([
-              B8.core.type.set(ResDict2.protein),
-              B8.ammp("label_comp_id")
-            ])
-          })
-        },
-        "polymer.nucleic": {
-          "@desc": "Nucleic Acid (New in PyMOL 2.1)",
-          abbr: ["polymer.nucleic"],
-          map: () => B8.struct.generator.atomGroups({
-            "residue-test": B8.core.set.has([
-              B8.core.type.set(ResDict2.nucleic),
-              B8.ammp("label_comp_id")
-            ])
-          })
-        }
-      };
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/pymol/parser.js
-  function orNull(rule) {
-    return rule.or(MonadicParser.of(null));
-  }
-  function atomSelectionQuery(x) {
-    const tests = {};
-    const props = {};
-    for (const k in x) {
-      const ps = properties2[k];
-      if (!ps) {
-        throw new Error(`property '${k}' not supported, value '${x[k]}'`);
-      }
-      if (x[k] === null)
-        continue;
-      if (!props[ps.level])
-        props[ps.level] = [];
-      props[ps.level].push(x[k]);
-    }
-    for (const p3 in props) {
-      tests[p3] = andExpr(props[p3]);
-    }
-    return B9.struct.generator.atomGroups(tests);
-  }
-  var B9, propertiesDict, slash, lang2, transpiler2;
-  var init_parser17 = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/pymol/parser.js"() {
-      init_monadic_parser();
-      init_helper();
-      init_builder();
-      init_properties4();
-      init_operators2();
-      init_keywords2();
-      B9 = MolScriptBuilder;
-      propertiesDict = getPropertyRules(properties2);
-      slash = MonadicParser.string("/");
-      lang2 = MonadicParser.createLanguage({
-        Parens: function(r) {
-          return MonadicParser.alt(r.Parens, r.Operator, r.Expression).wrap(MonadicParser.string("("), MonadicParser.string(")"));
-        },
-        Expression: function(r) {
-          return MonadicParser.alt(r.Keywords, r.AtomSelectionMacro.map(atomSelectionQuery), r.NamedAtomProperties, r.Pepseq, r.Rep, r.Object);
-        },
-        AtomSelectionMacro: function(r) {
-          return MonadicParser.alt(slash.then(MonadicParser.alt(MonadicParser.seq(orNull(r.ObjectProperty).skip(slash), orNull(propertiesDict.segi).skip(slash), orNull(propertiesDict.chain).skip(slash), orNull(propertiesDict.resi).skip(slash), orNull(propertiesDict.name)).map((x) => {
-            return { object: x[0], segi: x[1], chain: x[2], resi: x[3], name: x[4] };
-          }), MonadicParser.seq(orNull(r.ObjectProperty).skip(slash), orNull(propertiesDict.segi).skip(slash), orNull(propertiesDict.chain).skip(slash), orNull(propertiesDict.resi)).map((x) => {
-            return { object: x[0], segi: x[1], chain: x[2], resi: x[3] };
-          }), MonadicParser.seq(orNull(r.ObjectProperty).skip(slash), orNull(propertiesDict.segi).skip(slash), orNull(propertiesDict.chain)).map((x) => {
-            return { object: x[0], segi: x[1], chain: x[2] };
-          }), MonadicParser.seq(orNull(r.ObjectProperty).skip(slash), orNull(propertiesDict.segi)).map((x) => {
-            return { object: x[0], segi: x[1] };
-          }), MonadicParser.seq(orNull(r.ObjectProperty)).map((x) => {
-            return { object: x[0] };
-          }))), MonadicParser.alt(MonadicParser.seq(orNull(r.ObjectProperty).skip(slash), orNull(propertiesDict.segi).skip(slash), orNull(propertiesDict.chain).skip(slash), orNull(propertiesDict.resi).skip(slash), orNull(propertiesDict.name)).map((x) => {
-            return { object: x[0], segi: x[1], chain: x[2], resi: x[3], name: x[4] };
-          }), MonadicParser.seq(orNull(propertiesDict.segi).skip(slash), orNull(propertiesDict.chain).skip(slash), orNull(propertiesDict.resi).skip(slash), orNull(propertiesDict.name)).map((x) => {
-            return { segi: x[0], chain: x[1], resi: x[2], name: x[3] };
-          }), MonadicParser.seq(orNull(propertiesDict.chain).skip(slash), orNull(propertiesDict.resi).skip(slash), orNull(propertiesDict.name)).map((x) => {
-            return { chain: x[0], resi: x[1], name: x[2] };
-          }), MonadicParser.seq(orNull(propertiesDict.resi).skip(slash), orNull(propertiesDict.name)).map((x) => {
-            return { resi: x[0], name: x[1] };
-          })));
-        },
-        NamedAtomProperties: function() {
-          return MonadicParser.alt(...getNamedPropertyRules(properties2));
-        },
-        Keywords: () => MonadicParser.alt(...getKeywordRules(keywords2)),
-        ObjectProperty: () => {
-          const w = getReservedWords(properties2, keywords2, operators2).sort(strLenSortFn).map(escapeRegExp).join("|");
-          return MonadicParser.regexp(new RegExp(`(?!(${w}))[A-Z0-9_]+`, "i"));
-        },
-        Object: (r) => {
-          return r.ObjectProperty.notFollowedBy(slash).map((x) => {
-            throw new Error(`property 'object' not supported, value '${x}'`);
-          });
-        },
-        // Selects peptide sequence matching upper-case one-letter
-        // sequence SEQ (see also FindSeq).
-        // PEPSEQ seq
-        Pepseq: () => {
-          return MonadicParser.regexp(/(PEPSEQ|ps\.)\s+([a-z]+)/i, 2).map(makeError(`operator 'pepseq' not supported`));
-        },
-        // Selects atoms which show representation rep.
-        // REP rep
-        Rep: () => {
-          return MonadicParser.regexp(/REP\s+(lines|spheres|mesh|ribbon|cartoon|sticks|dots|surface|labels|extent|nonbonded|nb_spheres|slice|extent|slice|dashes|angles|dihedrals|cgo|cell|callback|everything)/i, 1).map(makeError(`operator 'rep' not supported`));
-        },
-        Operator: function(r) {
-          return combineOperators(operators2, MonadicParser.alt(r.Parens, r.Expression, r.Operator));
-        },
-        Query: function(r) {
-          return MonadicParser.alt(r.Operator, r.Parens, r.Expression).trim(MonadicParser.optWhitespace);
-        }
-      });
-      transpiler2 = (str11) => lang2.Query.tryParse(str11);
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/vmd/properties.js
-  function str10(x) {
-    return x;
-  }
-  function sstrucMap(x) {
-    return B10.struct.type.secondaryStructureFlags([sstrucDict2[x.toUpperCase()] || "none"]);
-  }
-  var B10, reFloat3, rePosInt2, reInt, sstrucDict2, properties3;
-  var init_properties5 = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/vmd/properties.js"() {
-      init_builder();
-      B10 = MolScriptBuilder;
-      reFloat3 = /[-+]?[0-9]*\.?[0-9]+/;
-      rePosInt2 = /[+]?[0-9]+/;
-      reInt = /[-+]?[0-9]+/;
-      sstrucDict2 = {
-        T: "turn",
-        // Turn
-        E: "sheet",
-        // Extended conformation ($\beta$ sheets)
-        B: "strand",
-        // Isolated bridge
-        H: "alpha",
-        // Alpha helix
-        G: "3-10",
-        // 3-10 helix
-        I: "pi",
-        // Pi helix
-        C: "none"
-        // Coil
-      };
-      properties3 = {
-        name: {
-          "@desc": "str    atom name",
-          "@examples": ["name CA"],
-          regex: /[a-zA-Z0-9]+/,
-          map: B10.atomName,
-          level: "atom-test",
-          property: B10.ammp("label_atom_id")
-        },
-        type: {
-          "@desc": "str    atom type",
-          "@examples": ["type C3"],
-          isUnsupported: true,
-          regex: /[a-zA-Z0-9]+/,
-          map: str10,
-          level: "atom-test"
-        },
-        index: {
-          "@desc": "num    the atom number, starting at 0",
-          "@examples": ["index 10"],
-          isNumeric: true,
-          regex: rePosInt2,
-          map: (x) => parseInt(x) - 1,
-          level: "atom-test",
-          property: B10.ammp("id")
-        },
-        serial: {
-          "@desc": "num    the atom number, starting at 1",
-          "@examples": ["serial 11"],
-          isNumeric: true,
-          regex: rePosInt2,
-          map: (x) => parseInt(x),
-          level: "atom-test",
-          property: B10.ammp("id")
-        },
-        atomicnumber: {
-          "@desc": "num    atomic number (0 if undefined)",
-          "@examples": ["atomicnumber 13"],
-          isNumeric: true,
-          regex: rePosInt2,
-          map: (x) => parseInt(x),
-          level: "atom-test",
-          property: B10.acp("atomicNumber")
-        },
-        element: {
-          "@desc": 'str  atomic element symbol string ("X" if undefined)',
-          "@examples": ["element N"],
-          regex: /[a-zA-Z0-9]{1,3}/,
-          map: (x) => B10.es(x),
-          level: "atom-test",
-          property: B10.acp("elementSymbol")
-        },
-        altloc: {
-          "@desc": "str  alternate location/conformation identifier",
-          "@examples": ["altloc C"],
-          regex: /[a-zA-Z0-9]+/,
-          map: str10,
-          level: "atom-test",
-          property: B10.ammp("label_alt_id")
-        },
-        chain: {
-          "@desc": "str  the one-character chain identifier",
-          "@examples": ["chain A"],
-          regex: /[a-zA-Z0-9]+/,
-          map: str10,
-          level: "residue-test",
-          property: B10.ammp("auth_asym_id")
-        },
-        residue: {
-          "@desc": "num  a set of connected atoms with the same residue number",
-          "@examples": ["residue < 11", "residue 11"],
-          isNumeric: true,
-          regex: reInt,
-          map: (x) => parseInt(x),
-          level: "residue-test",
-          property: B10.ammp("auth_seq_id")
-        },
-        fragment: {
-          "@desc": "num  a set of connected residues",
-          "@examples": ["fragment 42"],
-          isUnsupported: true,
-          isNumeric: true,
-          regex: reInt,
-          map: (x) => parseInt(x),
-          level: "residue-test"
-        },
-        pfrag: {
-          "@desc": "num  a set of connected protein residues",
-          "@examples": ["pfrag 42"],
-          isUnsupported: true,
-          isNumeric: true,
-          regex: reInt,
-          map: (x) => parseInt(x),
-          level: "residue-test"
-        },
-        nfrag: {
-          "@desc": "num  a set of connected nucleic residues",
-          "@examples": ["nfrag 42"],
-          isUnsupported: true,
-          isNumeric: true,
-          regex: reInt,
-          map: (x) => parseInt(x),
-          level: "residue-test"
-        },
-        sequence: {
-          "@desc": "str  a sequence given by one letter names",
-          "@examples": ["sequence PGATTACA"],
-          isUnsupported: true,
-          regex: /[a-zA-Z0-9]+/,
-          map: str10,
-          level: "residue-test"
-        },
-        numbonds: {
-          "@desc": "num  number of bonds",
-          "@examples": ["numbonds = 2", "numbonds >= 3"],
-          isNumeric: true,
-          regex: rePosInt2,
-          map: (x) => parseInt(x),
-          level: "atom-test",
-          property: B10.acp("bondCount")
-        },
-        resname: {
-          "@desc": "str  residue name",
-          "@examples": ["resname ALA"],
-          regex: /[a-zA-Z0-9]+/,
-          map: str10,
-          level: "residue-test",
-          property: B10.ammp("auth_comp_id")
-        },
-        resid: {
-          "@desc": "num  residue id",
-          "@examples": ["resid 42"],
-          isNumeric: true,
-          regex: reInt,
-          map: (x) => parseInt(x),
-          level: "residue-test",
-          property: B10.ammp("auth_seq_id")
-        },
-        segname: {
-          "@desc": "str  segment name",
-          "@examples": ["segname B"],
-          regex: /[a-zA-Z0-9]+/,
-          map: str10,
-          level: "residue-test",
-          property: B10.ammp("label_asym_id")
-        },
-        x: {
-          "@desc": "float  x coordinate",
-          "@examples": ["x 42"],
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B10.acp("x")
-        },
-        y: {
-          "@desc": "float  y coordinate",
-          "@examples": ["y > 1.7"],
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B10.acp("y")
-        },
-        z: {
-          "@desc": "float  z coordinate",
-          "@examples": ["z < 11", "z > -21"],
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B10.acp("z")
-        },
-        radius: {
-          "@desc": "float  atomic radius",
-          "@examples": ["radius > 1.3"],
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B10.acp("vdw")
-        },
-        mass: {
-          "@desc": "float  atomic mass",
-          "@examples": ["mass > 2"],
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B10.acp("mass")
-        },
-        charge: {
-          "@desc": "float  atomic charge",
-          "@examples": ["charge > 0", "charge 1"],
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B10.ammp("pdbx_formal_charge")
-        },
-        beta: {
-          "@desc": "float  temperature factor",
-          "@examples": ["beta < 20", "beta > 35"],
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B10.ammp("B_iso_or_equiv")
-        },
-        occupancy: {
-          "@desc": "float  occupancy",
-          "@examples": ["occupancy 1", "occupancy < 1"],
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseFloat(x),
-          level: "atom-test",
-          property: B10.ammp("occupancy")
-        },
-        user: {
-          "@desc": "float  time-varying user-specified value",
-          "@examples": ["user < 0.1"],
-          isUnsupported: true,
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseFloat(x),
-          level: "atom-test"
-        },
-        rasmol: {
-          "@desc": "str  translates Rasmol selection string to VMD",
-          "@examples": ["rasmol 'all'"],
-          isUnsupported: true,
-          regex: /[^']*/,
-          map: str10,
-          level: "atom-test"
-        },
-        structure: {
-          "@desc": "str  single letter name for the secondary structure",
-          "@examples": ["structure H", "structure H E"],
-          regex: /T|E|B|H|G|I|C/i,
-          map: sstrucMap,
-          level: "atom-test",
-          property: B10.ammp("secondaryStructureFlags")
-        },
-        phi: {
-          "@desc": "float  phi backbone conformational angles",
-          "@examples": ["phi < 160"],
-          isUnsupported: true,
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseFloat(x),
-          level: "residue-test"
-        },
-        psi: {
-          "@desc": "float  psi backbone conformational angles",
-          "@examples": ["psi < 160"],
-          isUnsupported: true,
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseFloat(x),
-          level: "residue-test"
-        },
-        ufx: {
-          "@desc": "num  force to apply in the x coordinate",
-          "@examples": ["ufx 1"],
-          isUnsupported: true,
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseInt(x),
-          level: "atom-test"
-        },
-        ufy: {
-          "@desc": "num  force to apply in the y coordinate",
-          "@examples": ["ufy 1"],
-          isUnsupported: true,
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseInt(x),
-          level: "atom-test"
-        },
-        ufz: {
-          "@desc": "num  force to apply in the z coordinate",
-          "@examples": ["ufz 1"],
-          isUnsupported: true,
-          isNumeric: true,
-          regex: reFloat3,
-          map: (x) => parseInt(x),
-          level: "atom-test"
-        }
-      };
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/vmd/operators.js
-  var B11, propNames, operators3;
-  var init_operators3 = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/vmd/operators.js"() {
-      init_monadic_parser();
-      init_helper();
-      init_builder();
-      init_properties5();
-      B11 = MolScriptBuilder;
-      propNames = Object.keys(properties3).sort(strLenSortFn).filter((name) => !properties3[name].isUnsupported).join("|");
-      operators3 = [
-        {
-          "@desc": "Selects atoms that are not included in s1.",
-          "@examples": ["not protein"],
-          name: "not",
-          type: prefix,
-          rule: MonadicParser.regexp(/NOT/i).skip(MonadicParser.whitespace),
-          map: (op2, selection) => invertExpr(selection)
-        },
-        {
-          "@desc": "Selects atoms within a specified distance of a selection",
-          "@examples": ["within 5 of name FE"],
-          name: "within",
-          type: prefix,
-          rule: prefixOp(/WITHIN\s+([-+]?[0-9]*\.?[0-9]+)\s+OF/i, 1).map((x) => parseFloat(x)),
-          map: (radius, selection) => {
-            return B11.struct.modifier.includeSurroundings({ 0: selection, radius });
-          }
-        },
-        {
-          "@desc": "Exclusive within, equivalent to (within 3 of X) and not X",
-          "@examples": ["exwithin 10 of resname HEM"],
-          name: "exwithin",
-          type: prefix,
-          rule: prefixOp(/EXWITHIN\s+([-+]?[0-9]*\.?[0-9]+)\s+OF/i, 1).map((x) => parseFloat(x)),
-          map: (radius, target) => {
-            return B11.struct.modifier.exceptBy({
-              "0": B11.struct.modifier.includeSurroundings({ 0: target, radius }),
-              by: target
-            });
-          }
-        },
-        {
-          "@desc": "Selects atoms which have the same keyword as the atoms in a given selection",
-          "@examples": ["same resid as name FE"],
-          name: "same",
-          type: prefix,
-          rule: prefixOp(new RegExp(`SAME\\s+(${propNames})\\s+AS`, "i"), 1).map((x) => properties3[x].property),
-          map: (property2, source) => {
-            return B11.struct.filter.withSameAtomProperties({
-              "0": B11.struct.generator.all(),
-              source,
-              property: property2
-            });
-          }
-        },
-        {
-          "@desc": "Selects atoms included in both s1 and s2.",
-          "@examples": ["backbone and protein"],
-          name: "and",
-          type: binaryLeft,
-          rule: MonadicParser.alt(infixOp(/AND/i), MonadicParser.whitespace),
-          map: (op2, selection, by) => B11.struct.modifier.intersectBy({ 0: selection, by })
-        },
-        {
-          "@desc": "Selects atoms included in either s1 or s2.",
-          "@examples": ["water or protein"],
-          name: "or",
-          type: binaryLeft,
-          rule: infixOp(/OR/i),
-          map: (op2, s1, s2) => B11.struct.combinator.merge([s1, s2])
-        }
-      ];
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/vmd/keywords.js
-  function proteinExpr2() {
-    return B12.struct.filter.pick({
-      0: B12.struct.generator.atomGroups({
-        "group-by": B12.ammp("residueKey")
-      }),
-      test: B12.core.set.isSubset([
-        atomNameSet(["C", "N", "CA", "O"]),
-        B12.ammpSet("label_atom_id")
-      ])
-    });
-  }
-  function nucleicExpr2() {
-    return B12.struct.filter.pick({
-      0: B12.struct.generator.atomGroups({
-        "group-by": B12.ammp("residueKey")
-      }),
-      test: B12.core.logic.and([
-        B12.core.set.isSubset([
-          atomNameSet(["P"]),
-          B12.ammpSet("label_atom_id")
-        ]),
-        B12.core.logic.or([
-          B12.core.set.isSubset([
-            atomNameSet(["O3'", "C3'", "C4'", "C5'", "O5'"]),
-            B12.ammpSet("label_atom_id")
-          ]),
-          B12.core.set.isSubset([
-            atomNameSet(["O3*", "C3*", "C4*", "C5*", "O5*"]),
-            B12.ammpSet("label_atom_id")
-          ])
-        ])
-      ])
-    });
-  }
-  function backboneExpr3() {
-    return B12.struct.combinator.merge([
-      B12.struct.generator.queryInSelection({
-        0: proteinExpr2(),
-        query: B12.struct.generator.atomGroups({
-          "atom-test": B12.core.set.has([
-            atomNameSet(Backbone3.protein),
-            B12.ammp("label_atom_id")
-          ])
-        })
-      }),
-      B12.struct.generator.queryInSelection({
-        0: nucleicExpr2(),
-        query: B12.struct.generator.atomGroups({
-          "atom-test": B12.core.set.has([
-            atomNameSet(Backbone3.nucleic),
-            B12.ammp("label_atom_id")
-          ])
-        })
-      })
-    ]);
-  }
-  function secStrucExpr(flags2) {
-    return B12.struct.generator.atomGroups({
-      "residue-test": B12.core.flags.hasAll([
-        B12.ammp("secondaryStructureFlags"),
-        B12.struct.type.secondaryStructureFlags(flags2)
-      ])
-    });
-  }
-  var B12, Backbone3, ResDict3, keywords3;
-  var init_keywords3 = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/vmd/keywords.js"() {
-      init_helper();
-      init_builder();
-      B12 = MolScriptBuilder;
-      Backbone3 = {
-        nucleic: ["P", "O3'", "O5'", "C5'", "C4'", "C3'", "OP1", "OP2", "O3*", "O5*", "C5*", "C4*", "C3*"],
-        protein: ["C", "N", "CA", "O"]
-      };
-      ResDict3 = {
-        acidic: ["ASP", "GLU"],
-        aliphatic: ["ALA", "GLY", "ILE", "LEU", "VAL"],
-        aromatic: ["HIS", "PHE", "TRP", "TYR"],
-        at: ["ADA", "A", "THY", "T"],
-        basic: ["ARG", "HIS", "LYS"],
-        buried: ["ALA", "LEU", "VAL", "ILE", "PHE", "CYS", "MET", "TRP"],
-        cg: ["CYT", "C", "GUA", "G"],
-        cyclic: ["HIS", "PHE", "PRO", "TRP", "TYR"],
-        hydrophobic: ["ALA", "LEU", "VAL", "ILE", "PRO", "PHE", "MET", "TRP"],
-        medium: ["VAL", "THR", "ASP", "ASN", "PRO", "CYS", "ASX", "PCA", "HYP"],
-        neutral: ["VAL", "PHE", "GLN", "TYR", "HIS", "CYS", "MET", "TRP", "ASX", "GLX", "PCA", "HYP"],
-        purine: ["ADE", "A", "GUA", "G"],
-        pyrimidine: ["CYT", "C", "THY", "T", "URI", "U"],
-        small: ["ALA", "GLY", "SER"],
-        water: ["H2O", "HH0", "OHH", "HOH", "OH2", "SOL", "WAT", "TIP", "TIP2", "TIP3", "TIP4"]
-      };
-      keywords3 = {
-        all: {
-          "@desc": "everything",
-          map: () => B12.struct.generator.all()
-        },
-        none: {
-          "@desc": "nothing",
-          map: () => B12.struct.generator.empty()
-        },
-        protein: {
-          "@desc": "a residue with atoms named C, N, CA, and O",
-          map: () => proteinExpr2()
-        },
-        nucleic: {
-          "@desc": "a residue with atoms named P, O1P, O2P and either O3', C3', C4', C5', O5' or O3*, C3*, C4*, C5*, O5*. This definition assumes that the base is phosphorylated, an assumption which will be corrected in the future.",
-          map: () => nucleicExpr2()
-        },
-        backbone: {
-          "@desc": "the C, N, CA, and O atoms of a protein and the equivalent atoms in a nucleic acid.",
-          map: () => backboneExpr3()
-        },
-        sidechain: {
-          "@desc": "non-backbone atoms and bonds",
-          // TODO: what does 'bonds' mean here?
-          map: () => invertExpr(backboneExpr3())
-        },
-        water: {
-          "@desc": "all atoms with the resname H2O, HH0, OHH, HOH, OH2, SOL, WAT, TIP, TIP2, TIP3 or TIP4",
-          abbr: ["waters"],
-          map: () => resnameExpr(ResDict3.water)
-        },
-        at: {
-          "@desc": "residues named ADA A THY T",
-          map: () => resnameExpr(ResDict3.at)
-        },
-        acidic: {
-          "@desc": "residues named ASP GLU",
-          map: () => resnameExpr(ResDict3.acidic)
-        },
-        acyclic: {
-          "@desc": '"protein and not cyclic"',
-          map: () => B12.struct.modifier.intersectBy({
-            0: proteinExpr2(),
-            by: invertExpr(resnameExpr(ResDict3.cyclic))
-          })
-        },
-        aliphatic: {
-          "@desc": "residues named ALA GLY ILE LEU VAL",
-          map: () => resnameExpr(ResDict3.aliphatic)
-        },
-        alpha: {
-          "@desc": "atom's residue is an alpha helix",
-          map: () => secStrucExpr(["alpha"])
-        },
-        amino: {
-          "@desc": "a residue with atoms named C, N, CA, and O",
-          map: () => proteinExpr2()
-        },
-        aromatic: {
-          "@desc": "residues named HIS PHE TRP TYR",
-          map: () => resnameExpr(ResDict3.aromatic)
-        },
-        basic: {
-          "@desc": "residues named ARG HIS LYS",
-          map: () => resnameExpr(ResDict3.basic)
-        },
-        bonded: {
-          "@desc": "atoms for which numbonds > 0",
-          map: () => asAtoms(B12.struct.filter.pick({
-            "0": B12.struct.modifier.includeConnected({
-              "0": B12.struct.generator.all(),
-              "bond-test": B12.core.flags.hasAny([
-                B12.struct.bondProperty.flags(),
-                B12.struct.type.bondFlags(["covalent", "metallic", "sulfide"])
-              ])
-            }),
-            test: B12.core.rel.gr([
-              B12.struct.atomSet.atomCount(),
-              1
-            ])
-          }))
-        },
-        buried: {
-          "@desc": "residues named ALA LEU VAL ILE PHE CYS MET TRP",
-          map: () => resnameExpr(ResDict3.buried)
-        },
-        cg: {
-          "@desc": "residues named CYT C GUA G",
-          map: () => resnameExpr(ResDict3.cg)
-        },
-        charged: {
-          "@desc": '"basic or acidic"',
-          map: () => resnameExpr(ResDict3.basic.concat(ResDict3.acidic))
-        },
-        cyclic: {
-          "@desc": "residues named HIS PHE PRO TRP TYR",
-          map: () => resnameExpr(ResDict3.cyclic)
-        },
-        hetero: {
-          "@desc": '"not (protein or nucleic)"',
-          map: () => invertExpr(B12.struct.combinator.merge([proteinExpr2(), nucleicExpr2()]))
-        },
-        hydrogen: {
-          "@desc": 'name "[0-9]?H.*"',
-          map: () => B12.struct.generator.atomGroups({
-            "atom-test": B12.core.str.match([
-              B12.core.type.regex(["^[0-9]?[H].*$", "i"]),
-              B12.core.type.str([B12.ammp("label_atom_id")])
-            ])
-          })
-        },
-        large: {
-          "@desc": '"protein and not (small or medium)"',
-          map: () => B12.struct.modifier.intersectBy({
-            0: proteinExpr2(),
-            by: invertExpr(resnameExpr(ResDict3.small.concat(ResDict3.medium)))
-          })
-        },
-        medium: {
-          "@desc": "residues named VAL THR ASP ASN PRO CYS ASX PCA HYP",
-          map: () => resnameExpr(ResDict3.medium)
-        },
-        neutral: {
-          "@desc": "residues named VAL PHE GLN TYR HIS CYS MET TRP ASX GLX PCA HYP",
-          map: () => resnameExpr(ResDict3.neutral)
-        },
-        hydrophobic: {
-          "@desc": "hydrophobic resname ALA LEU VAL ILE PRO PHE MET TRP",
-          map: () => resnameExpr(ResDict3.hydrophobic)
-        },
-        polar: {
-          "@desc": '"protein and not hydrophobic"',
-          map: () => B12.struct.modifier.intersectBy({
-            0: proteinExpr2(),
-            by: invertExpr(resnameExpr(ResDict3.hydrophobic))
-          })
-        },
-        purine: {
-          "@desc": "residues named ADE A GUA G",
-          map: () => resnameExpr(ResDict3.purine)
-        },
-        pyrimidine: {
-          "@desc": "residues named CYT C THY T URI U",
-          map: () => resnameExpr(ResDict3.pyrimidine)
-        },
-        small: {
-          "@desc": "residues named ALA GLY SER",
-          map: () => resnameExpr(ResDict3.small)
-        },
-        surface: {
-          "@desc": '"protein and not buried"',
-          map: () => B12.struct.modifier.intersectBy({
-            0: proteinExpr2(),
-            by: invertExpr(resnameExpr(ResDict3.buried))
-          })
-        },
-        alpha_helix: {
-          "@desc": "atom's residue is in an alpha helix",
-          map: () => secStrucExpr(["alpha"])
-        },
-        pi_helix: {
-          "@desc": "atom's residue is in a pi helix",
-          map: () => secStrucExpr(["pi"])
-        },
-        helix_3_10: {
-          "@desc": "atom's residue is in a 3-10 helix",
-          map: () => secStrucExpr(["3-10"])
-        },
-        helix: {
-          "@desc": "atom's residue is in an alpha or pi or 3-10 helix",
-          map: () => secStrucExpr(["helix"])
-        },
-        extended_beta: {
-          "@desc": "atom's residue is a beta sheet",
-          map: () => secStrucExpr(["sheet"])
-        },
-        bridge_beta: {
-          "@desc": "atom's residue is a beta sheet",
-          map: () => secStrucExpr(["strand"])
-        },
-        sheet: {
-          "@desc": "atom's residue is a beta sheet",
-          map: () => secStrucExpr(["beta"])
-        },
-        turn: {
-          "@desc": "atom's residue is in a turn conformation",
-          map: () => secStrucExpr(["turn"])
-        },
-        coil: {
-          "@desc": "atom's residue is in a coil conformation",
-          map: () => B12.struct.modifier.intersectBy({
-            0: proteinExpr2(),
-            by: secStrucExpr(["none"])
-          })
-        }
-      };
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/vmd/functions.js
-  var B13, functions;
-  var init_functions = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/vmd/functions.js"() {
-      init_builder();
-      B13 = MolScriptBuilder;
-      functions = {
-        "sqr": {
-          "@desc": "square of x",
-          "@examples": ["sqr(2)"],
-          map: (x) => B13.core.math.pow([x, 2])
-        },
-        "sqrt": {
-          "@desc": "square root of x",
-          "@examples": ["sqrt(2)"],
-          map: (x) => B13.core.math.sqrt([x])
-        },
-        "abs": {
-          "@desc": "absolute value of x",
-          "@examples": ["abs(2)"],
-          map: (x) => B13.core.math.abs([x])
-        },
-        "floor": {
-          "@desc": "largest integer not greater than x",
-          "@examples": ["floor(2)"],
-          map: (x) => B13.core.math.floor([x])
-        },
-        "ceil": {
-          "@desc": "smallest integer not less than x",
-          "@examples": ["ceil(2)"],
-          map: (x) => B13.core.math.ceil([x])
-        },
-        "sin": {
-          "@desc": "sine of x",
-          "@examples": ["sin(2)"],
-          map: (x) => B13.core.math.sin([x])
-        },
-        "cos": {
-          "@desc": "cosine of x",
-          "@examples": ["cos(2)"],
-          map: (x) => B13.core.math.cos([x])
-        },
-        "tan": {
-          "@desc": "tangent of x",
-          "@examples": ["tan(2)"],
-          map: (x) => B13.core.math.tan([x])
-        },
-        "atan": {
-          "@desc": "arctangent of x",
-          "@examples": ["atan(2)"],
-          map: (x) => B13.core.math.atan([x])
-        },
-        "asin": {
-          "@desc": "arcsin of x",
-          "@examples": ["asin(2)"],
-          map: (x) => B13.core.math.asin([x])
-        },
-        "acos": {
-          "@desc": "arccos of x",
-          "@examples": ["acos(2)"],
-          map: (x) => B13.core.math.acos([x])
-        },
-        "sinh": {
-          "@desc": "hyperbolic sine of x",
-          "@examples": ["sinh(2)"],
-          map: (x) => B13.core.math.sinh([x])
-        },
-        "cosh": {
-          "@desc": "hyperbolic cosine of x",
-          "@examples": ["cosh(2)"],
-          map: (x) => B13.core.math.cosh([x])
-        },
-        "tanh": {
-          "@desc": "hyperbolic tangent of x",
-          "@examples": ["tanh(2)"],
-          map: (x) => B13.core.math.tanh([x])
-        },
-        "exp": {
-          "@desc": "e to the power x",
-          "@examples": ["exp(2)"],
-          map: (x) => B13.core.math.exp([x])
-        },
-        "log": {
-          "@desc": "natural log of x",
-          "@examples": ["log(2)"],
-          map: (x) => B13.core.math.log([x])
-        },
-        "log10": {
-          "@desc": "log base 10 of x",
-          "@examples": ["log10(2)"],
-          map: (x) => B13.core.math.log10([x])
-        }
-      };
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/vmd/parser.js
-  var B14, valueOperators2, lang3, transpiler3;
-  var init_parser18 = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/vmd/parser.js"() {
-      init_monadic_parser();
-      init_helper();
-      init_builder();
-      init_properties5();
-      init_operators3();
-      init_keywords3();
-      init_functions();
-      B14 = MolScriptBuilder;
-      valueOperators2 = [
-        {
-          "@desc": "multiplication, division",
-          "@examples": [],
-          name: "mul-div",
-          type: binaryLeft,
-          rule: MonadicParser.regexp(/\s*(\*|\/)\s*/, 1),
-          map: (op2, e1, e2) => {
-            switch (op2) {
-              case "*":
-                return B14.core.math.mult([e1, e2]);
-              case "/":
-                return B14.core.math.div([e1, e2]);
-              default:
-                throw new Error(`value operator '${op2}' not supported`);
-            }
-          }
-        },
-        {
-          "@desc": "addition, substraction",
-          "@examples": [],
-          name: "add-sub",
-          type: binaryLeft,
-          rule: MonadicParser.regexp(/\s*(-|\+)\s*/, 1),
-          map: (op2, e1, e2) => {
-            switch (op2) {
-              case "-":
-                return B14.core.math.sub([e1, e2]);
-              case "+":
-                return B14.core.math.add([e1, e2]);
-              default:
-                throw new Error(`value operator '${op2}' not supported`);
-            }
-          }
-        },
-        {
-          "@desc": "value comparisons",
-          "@examples": [],
-          name: "comparison",
-          type: binaryLeft,
-          rule: MonadicParser.alt(MonadicParser.regexp(/\s*(=~|==|>=|<=|=|!=|>|<)\s*/, 1), MonadicParser.whitespace.result("=")),
-          map: (op2, e1, e2) => {
-            let expr;
-            if (e1.head !== void 0) {
-              if (e1.head.name === "structure-query.atom-property.macromolecular.secondary-structure-flags") {
-                expr = B14.core.flags.hasAny([e1, sstrucMap(e2)]);
-              }
-              if (e1.head.name === "core.type.regex") {
-                expr = B14.core.str.match([e1, B14.core.type.str([e2])]);
-              }
-            } else if (e2.head !== void 0) {
-              if (e2.head.name === "structure-query.atom-property.macromolecular.secondary-structure-flags") {
-                expr = B14.core.flags.hasAny([e2, sstrucMap(e1)]);
-              }
-              if (e2.head.name === "core.type.regex") {
-                expr = B14.core.str.match([e2, B14.core.type.str([e1])]);
-              }
-            } else if (op2 === "=~") {
-              if (e1.head) {
-                expr = B14.core.str.match([
-                  B14.core.type.regex([`^${e2}$`, "i"]),
-                  B14.core.type.str([e1])
-                ]);
-              } else {
-                expr = B14.core.str.match([
-                  B14.core.type.regex([`^${e1}$`, "i"]),
-                  B14.core.type.str([e2])
-                ]);
-              }
-            }
-            if (!expr) {
-              if (e1.head)
-                e2 = wrapValue(e1, e2);
-              if (e2.head)
-                e1 = wrapValue(e2, e1);
-              switch (op2) {
-                case "=":
-                case "==":
-                  expr = B14.core.rel.eq([e1, e2]);
-                  break;
-                case "!=":
-                  expr = B14.core.rel.neq([e1, e2]);
-                  break;
-                case ">":
-                  expr = B14.core.rel.gr([e1, e2]);
-                  break;
-                case "<":
-                  expr = B14.core.rel.lt([e1, e2]);
-                  break;
-                case ">=":
-                  expr = B14.core.rel.gre([e1, e2]);
-                  break;
-                case "<=":
-                  expr = B14.core.rel.lte([e1, e2]);
-                  break;
-                default:
-                  throw new Error(`value operator '${op2}' not supported`);
-              }
-            }
-            return B14.struct.generator.atomGroups({ "atom-test": expr });
-          }
-        }
-      ];
-      lang3 = MonadicParser.createLanguage({
-        Parens: function(r) {
-          return MonadicParser.alt(r.Parens, r.Operator, r.Expression).wrap(MonadicParser.string("("), MonadicParser.string(")"));
-        },
-        Expression: function(r) {
-          return MonadicParser.alt(
-            r.RangeListProperty,
-            //	    r.NamedAtomProperties,
-            r.ValueQuery,
-            r.Keywords
-          );
-        },
-        NamedAtomProperties: function() {
-          return MonadicParser.alt(...getNamedPropertyRules(properties3));
-        },
-        Keywords: () => MonadicParser.alt(...getKeywordRules(keywords3)),
-        ValueRange: function(r) {
-          return MonadicParser.seq(r.Value.skip(MonadicParser.regexp(/\s+TO\s+/i)), r.Value).map((x) => ({ range: x }));
-        },
-        RangeListProperty: function(r) {
-          return MonadicParser.seq(MonadicParser.alt(...getPropertyNameRules(properties3, /\s/)).skip(MonadicParser.whitespace), MonadicParser.alt(r.ValueRange, r.Value).sepBy1(MonadicParser.whitespace)).map((x) => {
-            const [property2, values2] = x;
-            const listValues = [];
-            const rangeValues = [];
-            values2.forEach((v2) => {
-              if (v2.range) {
-                rangeValues.push(B14.core.rel.inRange([property2, v2.range[0], v2.range[1]]));
-              } else {
-                listValues.push(wrapValue(property2, v2, sstrucDict2));
-              }
-            });
-            const rangeTest = orExpr(rangeValues);
-            const listTest = valuesTest(property2, listValues);
-            let test;
-            if (rangeTest && listTest) {
-              test = B14.core.logic.or([rangeTest, listTest]);
-            } else {
-              test = rangeTest ? rangeTest : listTest;
-            }
-            return B14.struct.generator.atomGroups({ [testLevel(property2)]: test });
-          });
-        },
-        Operator: function(r) {
-          return combineOperators(operators3, MonadicParser.alt(r.Parens, r.Expression, r.ValueQuery));
-        },
-        Query: function(r) {
-          return MonadicParser.alt(r.Operator, r.Parens, r.Expression).trim(MonadicParser.optWhitespace);
-        },
-        Number: function() {
-          return MonadicParser.regexp(/-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?/).map(Number).desc("number");
-        },
-        String: function() {
-          const w = getReservedWords(properties3, keywords3, operators3).sort(strLenSortFn).map(escapeRegExp).join("|");
-          return MonadicParser.alt(MonadicParser.regexp(new RegExp(`(?!(${w}))[A-Z0-9_]+`, "i")), MonadicParser.regexp(/'((?:[^"\\]|\\.)*)'/, 1), MonadicParser.regexp(/"((?:[^"\\]|\\.)*)"/, 1).map((x) => B14.core.type.regex([`^${x}$`, "i"]))).desc("string");
-        },
-        Value: function(r) {
-          return MonadicParser.alt(r.Number, r.String);
-        },
-        ValueParens: function(r) {
-          return MonadicParser.alt(r.ValueParens, r.ValueOperator, r.ValueExpressions).wrap(MonadicParser.string("("), MonadicParser.string(")"));
-        },
-        ValuePropertyNames: function() {
-          return MonadicParser.alt(...getPropertyNameRules(properties3, /=~|==|>=|<=|=|!=|>|<|\)|\s|\+|-|\*|\//i));
-        },
-        ValueOperator: function(r) {
-          return combineOperators(valueOperators2, MonadicParser.alt(r.ValueParens, r.ValueExpressions));
-        },
-        ValueExpressions: function(r) {
-          return MonadicParser.alt(r.ValueFunctions, r.Value, r.ValuePropertyNames);
-        },
-        ValueFunctions: function(r) {
-          return MonadicParser.alt(...getFunctionRules(functions, r.ValueOperator));
-        },
-        ValueQuery: function(r) {
-          return MonadicParser.alt(r.ValueOperator.map((x) => {
-            if (!x.head.name || !x.head.name.startsWith("structure-query.generator")) {
-              throw new Error(`values must be part of an comparison, value '${x}'`);
-            } else {
-              return x;
-            }
-          }));
-        }
-      });
-      transpiler3 = (str11) => lang3.Query.tryParse(str11);
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpilers/all.js
-  var _transpiler;
-  var init_all = __esm({
-    "node_modules/molstar/lib/mol-script/transpilers/all.js"() {
-      init_parser16();
-      init_parser17();
-      init_parser18();
-      _transpiler = {
-        pymol: transpiler2,
-        vmd: transpiler3,
-        jmol: transpiler
-      };
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/transpile.js
-  function parse4(lang4, str11) {
-    try {
-      const query2 = transpiler4[lang4](str11);
-      return query2;
-    } catch (e) {
-      console.error(e.message);
-      throw e;
-    }
-  }
-  var transpiler4;
-  var init_transpile = __esm({
-    "node_modules/molstar/lib/mol-script/transpile.js"() {
-      init_all();
-      transpiler4 = _transpiler;
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/runtime/query/table.js
-  function atomProp2(p3) {
-    return (ctx, xs) => p3(xs && xs[0] && xs[0](ctx) || ctx.element);
-  }
-  function bondFlag(current2, f) {
-    return current2 | (BondType.isName(f) ? BondType.fromName(f) : BondType.Flag.None);
-  }
-  function secondaryStructureFlag(current2, f) {
-    switch (f.toLowerCase()) {
-      case "helix":
-        return current2 | SecondaryStructureType.Flag.Helix;
-      case "alpha":
-        return current2 | SecondaryStructureType.Flag.Helix | SecondaryStructureType.Flag.HelixAlpha;
-      case "pi":
-        return current2 | SecondaryStructureType.Flag.Helix | SecondaryStructureType.Flag.HelixPi;
-      case "310":
-        return current2 | SecondaryStructureType.Flag.Helix | SecondaryStructureType.Flag.Helix3Ten;
-      case "beta":
-        return current2 | SecondaryStructureType.Flag.Beta;
-      case "strand":
-        return current2 | SecondaryStructureType.Flag.Beta | SecondaryStructureType.Flag.BetaStrand;
-      case "sheet":
-        return current2 | SecondaryStructureType.Flag.Beta | SecondaryStructureType.Flag.BetaSheet;
-      case "turn":
-        return current2 | SecondaryStructureType.Flag.Turn;
-      case "bend":
-        return current2 | SecondaryStructureType.Flag.Bend;
-      case "coil":
-        return current2 | SecondaryStructureType.Flag.NA;
-      default:
-        return current2;
-    }
-  }
-  function getArray(ctx, xs) {
-    const ret = [];
-    if (!xs)
-      return ret;
-    if (typeof xs.length === "number") {
-      for (let i = 0, _i = xs.length; i < _i; i++)
-        ret.push(xs[i](ctx));
-    } else {
-      const keys2 = Object.keys(xs);
-      for (let i = 1, _i = keys2.length; i < _i; i++)
-        ret.push(xs[keys2[i]](ctx));
-    }
-    return ret;
-  }
-  var C3, D, symbols;
-  var init_table2 = __esm({
-    "node_modules/molstar/lib/mol-script/runtime/query/table.js"() {
-      init_symbol_table();
-      init_base();
-      init_structure3();
-      init_types();
-      init_set();
-      init_string();
-      init_atomic();
-      init_hash_functions();
-      init_internal2();
-      init_array();
-      C3 = QuerySymbolRuntime.Const;
-      D = QuerySymbolRuntime.Dynamic;
-      symbols = [
-        // ============= TYPES =============
-        C3(MolScriptSymbolTable.core.type.bool, function core_type_bool(ctx, v2) {
-          return !!v2[0](ctx);
-        }),
-        C3(MolScriptSymbolTable.core.type.num, function core_type_num(ctx, v2) {
-          return +v2[0](ctx);
-        }),
-        C3(MolScriptSymbolTable.core.type.str, function core_type_str(ctx, v2) {
-          return "" + v2[0](ctx);
-        }),
-        C3(MolScriptSymbolTable.core.type.list, function core_type_list(ctx, xs) {
-          return QueryRuntimeArguments.forEachEval(xs, ctx, (v2, i, list3) => list3[i] = v2, []);
-        }),
-        C3(MolScriptSymbolTable.core.type.set, function core_type_set(ctx, xs) {
-          return QueryRuntimeArguments.forEachEval(xs, ctx, function core_type_set_argEval(v2, i, set4) {
-            return set4.add(v2);
-          }, /* @__PURE__ */ new Set());
-        }),
-        C3(MolScriptSymbolTable.core.type.regex, function core_type_regex(ctx, v2) {
-          return new RegExp(v2[0](ctx), v2[1] && v2[1](ctx) || "");
-        }),
-        C3(MolScriptSymbolTable.core.type.bitflags, function core_type_bitflags(ctx, v2) {
-          return +v2[0](ctx);
-        }),
-        C3(MolScriptSymbolTable.core.type.compositeKey, function core_type_compositeKey(ctx, xs) {
-          return QueryRuntimeArguments.forEachEval(xs, ctx, (v2, i, list3) => list3[i] = "" + v2, []).join("-");
-        }),
-        // ============= LOGIC ================
-        C3(MolScriptSymbolTable.core.logic.not, (ctx, v2) => !v2[0](ctx)),
-        C3(MolScriptSymbolTable.core.logic.and, (ctx, xs) => {
-          if (typeof xs.length === "number") {
-            for (let i = 0, _i = xs.length; i < _i; i++)
-              if (!xs[i](ctx))
-                return false;
-          } else {
-            for (const k of Object.keys(xs))
-              if (!xs[k](ctx))
-                return false;
-          }
-          return true;
-        }),
-        C3(MolScriptSymbolTable.core.logic.or, (ctx, xs) => {
-          if (typeof xs.length === "number") {
-            for (let i = 0, _i = xs.length; i < _i; i++)
-              if (xs[i](ctx))
-                return true;
-          } else {
-            for (const k of Object.keys(xs))
-              if (xs[k](ctx))
-                return true;
-          }
-          return false;
-        }),
-        // ============= RELATIONAL ================
-        C3(MolScriptSymbolTable.core.rel.eq, (ctx, v2) => v2[0](ctx) === v2[1](ctx)),
-        C3(MolScriptSymbolTable.core.rel.neq, (ctx, v2) => v2[0](ctx) !== v2[1](ctx)),
-        C3(MolScriptSymbolTable.core.rel.lt, (ctx, v2) => v2[0](ctx) < v2[1](ctx)),
-        C3(MolScriptSymbolTable.core.rel.lte, (ctx, v2) => v2[0](ctx) <= v2[1](ctx)),
-        C3(MolScriptSymbolTable.core.rel.gr, (ctx, v2) => v2[0](ctx) > v2[1](ctx)),
-        C3(MolScriptSymbolTable.core.rel.gre, (ctx, v2) => v2[0](ctx) >= v2[1](ctx)),
-        C3(MolScriptSymbolTable.core.rel.inRange, (ctx, v2) => {
-          const x = v2[0](ctx);
-          return x >= v2[1](ctx) && x <= v2[2](ctx);
-        }),
-        // ============= ARITHMETIC ================
-        C3(MolScriptSymbolTable.core.math.add, (ctx, xs) => {
-          let ret = 0;
-          if (typeof xs.length === "number") {
-            for (let i = 0, _i = xs.length; i < _i; i++)
-              ret += xs[i](ctx);
-          } else {
-            for (const k of Object.keys(xs))
-              ret += xs[k](ctx);
-          }
-          return ret;
-        }),
-        C3(MolScriptSymbolTable.core.math.sub, (ctx, xs) => {
-          let ret = 0;
-          if (typeof xs.length === "number") {
-            if (xs.length === 1)
-              return -xs[0](ctx);
-            ret = xs[0](ctx) || 0;
-            for (let i = 1, _i = xs.length; i < _i; i++)
-              ret -= xs[i](ctx);
-          } else {
-            const keys2 = Object.keys(xs);
-            if (keys2.length === 1)
-              return -xs[keys2[0]](ctx);
-            ret = xs[keys2[0]](ctx) || 0;
-            for (let i = 1, _i = keys2.length; i < _i; i++)
-              ret -= xs[keys2[i]](ctx);
-          }
-          return ret;
-        }),
-        C3(MolScriptSymbolTable.core.math.mult, (ctx, xs) => {
-          let ret = 1;
-          if (typeof xs.length === "number") {
-            for (let i = 0, _i = xs.length; i < _i; i++)
-              ret *= xs[i](ctx);
-          } else {
-            for (const k of Object.keys(xs))
-              ret *= xs[k](ctx);
-          }
-          return ret;
-        }),
-        C3(MolScriptSymbolTable.core.math.div, (ctx, v2) => v2[0](ctx) / v2[1](ctx)),
-        C3(MolScriptSymbolTable.core.math.pow, (ctx, v2) => Math.pow(v2[0](ctx), v2[1](ctx))),
-        C3(MolScriptSymbolTable.core.math.mod, (ctx, v2) => v2[0](ctx) % v2[1](ctx)),
-        C3(MolScriptSymbolTable.core.math.min, (ctx, xs) => {
-          let ret = Number.POSITIVE_INFINITY;
-          if (typeof xs.length === "number") {
-            for (let i = 0, _i = xs.length; i < _i; i++)
-              ret = Math.min(xs[i](ctx), ret);
-          } else {
-            for (const k of Object.keys(xs))
-              ret = Math.min(xs[k](ctx), ret);
-          }
-          return ret;
-        }),
-        C3(MolScriptSymbolTable.core.math.max, (ctx, xs) => {
-          let ret = Number.NEGATIVE_INFINITY;
-          if (typeof xs.length === "number") {
-            for (let i = 0, _i = xs.length; i < _i; i++)
-              ret = Math.max(xs[i](ctx), ret);
-          } else {
-            for (const k of Object.keys(xs))
-              ret = Math.max(xs[k](ctx), ret);
-          }
-          return ret;
-        }),
-        C3(MolScriptSymbolTable.core.math.cantorPairing, (ctx, v2) => cantorPairing(v2[0](ctx), v2[1](ctx))),
-        C3(MolScriptSymbolTable.core.math.sortedCantorPairing, (ctx, v2) => sortedCantorPairing(v2[0](ctx), v2[1](ctx))),
-        C3(MolScriptSymbolTable.core.math.invertCantorPairing, (ctx, v2) => invertCantorPairing([0, 0], v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.floor, (ctx, v2) => Math.floor(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.ceil, (ctx, v2) => Math.ceil(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.roundInt, (ctx, v2) => Math.round(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.trunc, (ctx, v2) => Math.trunc(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.abs, (ctx, v2) => Math.abs(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.sign, (ctx, v2) => Math.sign(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.sqrt, (ctx, v2) => Math.sqrt(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.cbrt, (ctx, v2) => Math.cbrt(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.sin, (ctx, v2) => Math.sin(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.cos, (ctx, v2) => Math.cos(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.tan, (ctx, v2) => Math.tan(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.asin, (ctx, v2) => Math.asin(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.acos, (ctx, v2) => Math.acos(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.atan, (ctx, v2) => Math.atan(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.sinh, (ctx, v2) => Math.sinh(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.cosh, (ctx, v2) => Math.cosh(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.tanh, (ctx, v2) => Math.tanh(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.exp, (ctx, v2) => Math.exp(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.log, (ctx, v2) => Math.log(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.log10, (ctx, v2) => Math.log10(v2[0](ctx))),
-        C3(MolScriptSymbolTable.core.math.atan2, (ctx, v2) => Math.atan2(v2[0](ctx), v2[1](ctx))),
-        // ============= STRING ================
-        C3(MolScriptSymbolTable.core.str.match, (ctx, v2) => v2[0](ctx).test(v2[1](ctx))),
-        C3(MolScriptSymbolTable.core.str.concat, (ctx, xs) => {
-          const ret = [];
-          if (typeof xs.length === "number") {
-            for (let i = 0, _i = xs.length; i < _i; i++)
-              ret.push(xs[i](ctx).toString());
-          } else {
-            for (const k of Object.keys(xs))
-              ret.push(xs[k](ctx).toString());
-          }
-          return ret.join("");
-        }),
-        // ============= LIST ================
-        C3(MolScriptSymbolTable.core.list.getAt, (ctx, v2) => v2[0](ctx)[v2[1](ctx)]),
-        C3(MolScriptSymbolTable.core.list.equal, (ctx, v2) => arrayEqual2(v2[0](ctx), v2[1](ctx))),
-        // ============= SET ================
-        C3(MolScriptSymbolTable.core.set.has, function core_set_has(ctx, v2) {
-          return v2[0](ctx).has(v2[1](ctx));
-        }),
-        C3(MolScriptSymbolTable.core.set.isSubset, function core_set_isSubset(ctx, v2) {
-          return SetUtils.isSuperset(v2[1](ctx), v2[0](ctx));
-        }),
-        // ============= FLAGS ================
-        C3(MolScriptSymbolTable.core.flags.hasAny, (ctx, v2) => {
-          const test = v2[1](ctx);
-          const tested = v2[0](ctx);
-          if (!test)
-            return !!tested;
-          return (tested & test) !== 0;
-        }),
-        C3(MolScriptSymbolTable.core.flags.hasAll, (ctx, v2) => {
-          const test = v2[1](ctx);
-          const tested = v2[0](ctx);
-          if (!test)
-            return !tested;
-          return (tested & test) === test;
-        }),
-        // Structure
-        // ============= TYPES ================
-        C3(MolScriptSymbolTable.structureQuery.type.elementSymbol, (ctx, v2) => ElementSymbol(v2[0](ctx))),
-        C3(MolScriptSymbolTable.structureQuery.type.atomName, (ctx, v2) => upperCaseAny(v2[0](ctx))),
-        C3(MolScriptSymbolTable.structureQuery.type.bondFlags, (ctx, xs) => {
-          let ret = BondType.Flag.None;
-          if (typeof xs.length === "number") {
-            for (let i = 0, _i = xs.length; i < _i; i++)
-              ret = bondFlag(ret, xs[i](ctx));
-          } else {
-            for (const k of Object.keys(xs))
-              ret = bondFlag(ret, xs[k](ctx));
-          }
-          return ret;
-        }),
-        C3(MolScriptSymbolTable.structureQuery.type.ringFingerprint, (ctx, xs) => UnitRing.elementFingerprint(getArray(ctx, xs))),
-        C3(MolScriptSymbolTable.structureQuery.type.secondaryStructureFlags, (ctx, xs) => {
-          let ret = SecondaryStructureType.Flag.None;
-          if (typeof xs.length === "number") {
-            for (let i = 0, _i = xs.length; i < _i; i++)
-              ret = secondaryStructureFlag(ret, xs[i](ctx));
-          } else {
-            for (const k of Object.keys(xs))
-              ret = secondaryStructureFlag(ret, xs[k](ctx));
-          }
-          return ret;
-        }),
-        // TODO:
-        // C(MolScript.structureQuery.type.entityType, (ctx, v) => StructureRuntime.Common.entityType(v[0](ctx))),
-        // C(MolScript.structureQuery.type.authResidueId, (ctx, v) => ResidueIdentifier.auth(v[0](ctx), v[1](ctx), v[2] && v[2](ctx))),
-        // C(MolScript.structureQuery.type.labelResidueId, (ctx, v) => ResidueIdentifier.label(v[0](ctx), v[1](ctx), v[2](ctx), v[3] && v[3](ctx))),
-        // ============= SLOTS ================
-        // TODO: slots might not be needed after all: reducer simply pushes/pops current element
-        // C(MolScript.structureQuery.slot.element, (ctx, _) => ctx_.element),
-        // C(MolScript.structureQuery.slot.elementSetReduce, (ctx, _) => ctx_.element),
-        // ============= FILTERS ================
-        D(MolScriptSymbolTable.structureQuery.filter.pick, (ctx, xs) => Queries.filters.pick(xs[0], xs["test"])(ctx)),
-        D(MolScriptSymbolTable.structureQuery.filter.first, (ctx, xs) => Queries.filters.first(xs[0])(ctx)),
-        D(MolScriptSymbolTable.structureQuery.filter.withSameAtomProperties, (ctx, xs) => Queries.filters.withSameAtomProperties(xs[0], xs["source"], xs["property"])(ctx)),
-        D(MolScriptSymbolTable.structureQuery.filter.intersectedBy, (ctx, xs) => Queries.filters.areIntersectedBy(xs[0], xs["by"])(ctx)),
-        D(MolScriptSymbolTable.structureQuery.filter.within, (ctx, xs) => {
-          var _a, _b, _c;
-          return Queries.filters.within({
-            query: xs[0],
-            target: xs["target"],
-            minRadius: (_a = xs["min-radius"]) === null || _a === void 0 ? void 0 : _a.call(xs, ctx),
-            maxRadius: (_b = xs["max-radius"]) === null || _b === void 0 ? void 0 : _b.call(xs, ctx),
-            elementRadius: xs["atom-radius"],
-            invert: (_c = xs["invert"]) === null || _c === void 0 ? void 0 : _c.call(xs, ctx)
-          })(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.filter.isConnectedTo, (ctx, xs) => {
-          var _a, _b;
-          return Queries.filters.isConnectedTo({
-            query: xs[0],
-            target: xs["target"],
-            disjunct: (_a = xs["disjunct"]) === null || _a === void 0 ? void 0 : _a.call(xs, ctx),
-            invert: (_b = xs["invert"]) === null || _b === void 0 ? void 0 : _b.call(xs, ctx),
-            bondTest: xs["bond-test"]
-          })(ctx);
-        }),
-        // ============= GENERATORS ================
-        D(MolScriptSymbolTable.structureQuery.generator.atomGroups, function structureQuery_generator_atomGroups(ctx, xs) {
-          return Queries.generators.atoms({
-            entityTest: xs["entity-test"],
-            chainTest: xs["chain-test"],
-            residueTest: xs["residue-test"],
-            atomTest: xs["atom-test"],
-            groupBy: xs["group-by"]
-          })(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.generator.all, function structureQuery_generator_all(ctx) {
-          return Queries.generators.all(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.generator.empty, function structureQuery_generator_empty(ctx) {
-          return Queries.generators.none(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.generator.bondedAtomicPairs, function structureQuery_generator_bondedAtomicPairs(ctx, xs) {
-          return Queries.generators.bondedAtomicPairs(xs && xs[0])(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.generator.rings, function structureQuery_generator_rings(ctx, xs) {
-          var _a, _b;
-          return Queries.generators.rings((_a = xs === null || xs === void 0 ? void 0 : xs["fingerprint"]) === null || _a === void 0 ? void 0 : _a.call(xs, ctx), (_b = xs === null || xs === void 0 ? void 0 : xs["only-aromatic"]) === null || _b === void 0 ? void 0 : _b.call(xs, ctx))(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.generator.queryInSelection, function structureQuery_generator_queryInSelection(ctx, xs) {
-          var _a;
-          return Queries.generators.querySelection(xs[0], xs["query"], (_a = xs["in-complement"]) === null || _a === void 0 ? void 0 : _a.call(xs, ctx))(ctx);
-        }),
-        // ============= MODIFIERS ================
-        D(MolScriptSymbolTable.structureQuery.modifier.includeSurroundings, function structureQuery_modifier_includeSurroundings(ctx, xs) {
-          return Queries.modifiers.includeSurroundings(xs[0], {
-            radius: xs["radius"](ctx),
-            wholeResidues: !!(xs["as-whole-residues"] && xs["as-whole-residues"](ctx)),
-            elementRadius: xs["atom-radius"]
-          })(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.modifier.surroundingLigands, function structureQuery_modifier_includeSurroundingLigands(ctx, xs) {
-          return Queries.modifiers.surroundingLigands({
-            query: xs[0],
-            radius: xs["radius"](ctx),
-            includeWater: !!(xs["include-water"] && xs["include-water"](ctx))
-          })(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.modifier.wholeResidues, function structureQuery_modifier_wholeResidues(ctx, xs) {
-          return Queries.modifiers.wholeResidues(xs[0])(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.modifier.union, function structureQuery_modifier_union(ctx, xs) {
-          return Queries.modifiers.union(xs[0])(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.modifier.expandProperty, function structureQuery_modifier_expandProperty(ctx, xs) {
-          return Queries.modifiers.expandProperty(xs[0], xs["property"])(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.modifier.exceptBy, function structureQuery_modifier_exceptBy(ctx, xs) {
-          return Queries.modifiers.exceptBy(xs[0], xs["by"])(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.modifier.includeConnected, function structureQuery_modifier_includeConnected(ctx, xs) {
-          var _a, _b;
-          return Queries.modifiers.includeConnected({
-            query: xs[0],
-            bondTest: xs["bond-test"],
-            wholeResidues: !!(xs["as-whole-residues"] && xs["as-whole-residues"](ctx)),
-            layerCount: xs["layer-count"] && xs["layer-count"](ctx) || 1,
-            fixedPoint: (_b = (_a = xs["fixed-point"]) === null || _a === void 0 ? void 0 : _a.call(xs, ctx)) !== null && _b !== void 0 ? _b : false
-          })(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.modifier.intersectBy, function structureQuery_modifier_intersectBy(ctx, xs) {
-          return Queries.modifiers.intersectBy(xs[0], xs["by"])(ctx);
-        }),
-        // ============= COMBINATORS ================
-        D(MolScriptSymbolTable.structureQuery.combinator.merge, (ctx, xs) => Queries.combinators.merge(xs)(ctx)),
-        // ============= ATOM PROPERTIES ================
-        // ~~~ CORE ~~~
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.elementSymbol, atomProp2(StructureProperties.atom.type_symbol)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.vdw, (ctx, xs) => VdwRadius(StructureProperties.atom.type_symbol(xs && xs[0] && xs[0](ctx) || ctx.element))),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.mass, (ctx, xs) => AtomWeight(StructureProperties.atom.type_symbol(xs && xs[0] && xs[0](ctx) || ctx.element))),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.atomicNumber, (ctx, xs) => AtomNumber(StructureProperties.atom.type_symbol(xs && xs[0] && xs[0](ctx) || ctx.element))),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.x, atomProp2(StructureProperties.atom.x)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.y, atomProp2(StructureProperties.atom.y)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.z, atomProp2(StructureProperties.atom.z)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.sourceIndex, atomProp2(StructureProperties.atom.sourceIndex)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.operatorName, atomProp2(StructureProperties.unit.operator_name)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.instanceId, atomProp2(StructureProperties.unit.instance_id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.operatorKey, atomProp2(StructureProperties.unit.operator_key)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.modelIndex, atomProp2(StructureProperties.unit.model_index)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.modelLabel, atomProp2(StructureProperties.unit.model_label)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.modelEntryId, atomProp2(StructureProperties.unit.model_entry_id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.core.atomKey, (ctx, xs) => {
-          const e = xs && xs[0] && xs[0](ctx) || ctx.element;
-          return cantorPairing(e.unit.id, e.element);
-        }),
-        // TODO:
-        // D(MolScript.structureQuery.atomProperty.core.bondCount, (ctx, _) => ),
-        // ~~~ TOPOLOGY ~~~
-        // TODO
-        // ~~~ MACROMOLECULAR ~~~
-        // TODO:
-        // // identifiers
-        // labelResidueId: prop((env, v) => ResidueIdentifier.labelOfResidueIndex(env.context.model, getAddress(env, v).residue)),
-        // authResidueId: prop((env, v) => ResidueIdentifier.authOfResidueIndex(env.context.model, getAddress(env, v).residue)),
-        // keys
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.residueKey, (ctx, xs) => element_exports.residueIndex(xs && xs[0] && xs[0](ctx) || ctx.element)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.chainKey, (ctx, xs) => element_exports.chainIndex(xs && xs[0] && xs[0](ctx) || ctx.element)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityKey, (ctx, xs) => element_exports.entityIndex(xs && xs[0] && xs[0](ctx) || ctx.element)),
-        // mmCIF
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.id, atomProp2(StructureProperties.atom.id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.isHet, (ctx, xs) => StructureProperties.residue.group_PDB(xs && xs[0] && xs[0](ctx) || ctx.element) !== "ATOM"),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_atom_id, atomProp2(StructureProperties.atom.label_atom_id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_alt_id, atomProp2(StructureProperties.atom.label_alt_id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_comp_id, atomProp2(StructureProperties.atom.label_comp_id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_seq_id, atomProp2(StructureProperties.residue.label_seq_id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_asym_id, atomProp2(StructureProperties.chain.label_asym_id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.label_entity_id, atomProp2(StructureProperties.entity.id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_atom_id, atomProp2(StructureProperties.atom.auth_atom_id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_comp_id, atomProp2(StructureProperties.atom.auth_comp_id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_seq_id, atomProp2(StructureProperties.residue.auth_seq_id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.auth_asym_id, atomProp2(StructureProperties.chain.auth_asym_id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.pdbx_PDB_ins_code, atomProp2(StructureProperties.residue.pdbx_PDB_ins_code)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.pdbx_formal_charge, atomProp2(StructureProperties.atom.pdbx_formal_charge)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.occupancy, atomProp2(StructureProperties.atom.occupancy)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.B_iso_or_equiv, atomProp2(StructureProperties.atom.B_iso_or_equiv)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityType, atomProp2(StructureProperties.entity.type)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entitySubtype, atomProp2(StructureProperties.entity.subtype)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityPrdId, atomProp2(StructureProperties.entity.prd_id)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.entityDescription, atomProp2(StructureProperties.entity.pdbx_description)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.objectPrimitive, atomProp2(StructureProperties.unit.object_primitive)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.isNonStandard, atomProp2(StructureProperties.residue.isNonStandard)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.secondaryStructureKey, atomProp2(StructureProperties.residue.secondary_structure_key)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.secondaryStructureFlags, atomProp2(StructureProperties.residue.secondary_structure_type)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.chemCompType, atomProp2(StructureProperties.residue.chem_comp_type)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.macromolecular.residueSourceIndex, atomProp2(StructureProperties.residue.residueSourceIndex)),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.ihm.hasSeqId, function structureQuery_atomProperty_ihm_hasSeqId(ctx, xs) {
-          const current2 = ctx.element;
-          const seqId2 = xs && xs[0] && xs[0](ctx);
-          if (current2.unit.kind === Unit.Kind.Atomic) {
-            return seqId2 === StructureProperties.residue.label_seq_id(current2);
-          }
-          return seqId2 >= StructureProperties.coarse.seq_id_begin(current2) && seqId2 <= StructureProperties.coarse.seq_id_end(current2);
-        }),
-        D(MolScriptSymbolTable.structureQuery.atomProperty.ihm.overlapsSeqIdRange, function structureQuery_atomProperty_ihm_hasSeqId2(ctx, xs) {
-          var _a, _b;
-          const current2 = ctx.element;
-          const beg = (_a = xs && xs.beg && xs.beg(ctx)) !== null && _a !== void 0 ? _a : -Number.MAX_VALUE;
-          const end4 = (_b = xs && xs.end && xs.end(ctx)) !== null && _b !== void 0 ? _b : Number.MAX_VALUE;
-          if (current2.unit.kind === Unit.Kind.Atomic) {
-            const value = StructureProperties.residue.label_seq_id(current2);
-            return value >= beg && value <= end4;
-          }
-          const a5 = StructureProperties.coarse.seq_id_begin(current2);
-          const b5 = StructureProperties.coarse.seq_id_end(current2);
-          return a5 >= beg && a5 <= end4 || b5 >= beg && b5 <= end4 || a5 <= beg && b5 >= end4;
-        }),
-        // ============= ATOM SET ================
-        D(MolScriptSymbolTable.structureQuery.atomSet.atomCount, function structureQuery_atomset_atomCount(ctx, xs) {
-          return Queries.atomset.atomCount(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.atomSet.countQuery, function structureQuery_atomset_countQuery(ctx, xs) {
-          return Queries.atomset.countQuery(xs[0])(ctx);
-        }),
-        D(MolScriptSymbolTable.structureQuery.atomSet.propertySet, function structureQuery_atomset_propertySet(ctx, xs) {
-          return Queries.atomset.propertySet(xs[0])(ctx);
-        }),
-        // ============= BOND PROPERTIES ================
-        D(MolScriptSymbolTable.structureQuery.bondProperty.order, (ctx, xs) => ctx.atomicBond.order),
-        D(MolScriptSymbolTable.structureQuery.bondProperty.flags, (ctx, xs) => ctx.atomicBond.type),
-        D(MolScriptSymbolTable.structureQuery.bondProperty.key, (ctx, xs) => ctx.atomicBond.key),
-        D(MolScriptSymbolTable.structureQuery.bondProperty.atomA, (ctx, xs) => ctx.atomicBond.a),
-        D(MolScriptSymbolTable.structureQuery.bondProperty.atomB, (ctx, xs) => ctx.atomicBond.b),
-        D(MolScriptSymbolTable.structureQuery.bondProperty.length, (ctx, xs) => ctx.atomicBond.length),
-        // Internal
-        D(MolScriptSymbolTable.internal.generator.bundleElement, function internal_generator_bundleElement(ctx, xs) {
-          return bundleElementImpl(xs.groupedUnits(ctx), xs.ranges(ctx), xs.set(ctx));
-        }),
-        D(MolScriptSymbolTable.internal.generator.bundle, function internal_generator_bundle(ctx, xs) {
-          return bundleGenerator(xs.elements(ctx))(ctx);
-        }),
-        D(MolScriptSymbolTable.internal.generator.current, function internal_generator_current(ctx, xs) {
-          return ctx.tryGetCurrentSelection();
-        })
-      ];
-      (function() {
-        for (const s of symbols) {
-          DefaultQueryRuntimeTable.addSymbol(s);
-        }
-      })();
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/runtime/query/compiler.js
-  var init_compiler = __esm({
-    "node_modules/molstar/lib/mol-script/runtime/query/compiler.js"() {
-      init_base();
-      init_table2();
-    }
-  });
-
-  // node_modules/molstar/lib/mol-script/script.js
-  function ScriptImpl(expression, language) {
-    return { expression, language };
-  }
-  var init_script = __esm({
-    "node_modules/molstar/lib/mol-script/script.js"() {
-      init_symbols();
-      init_parser15();
-      init_transpile();
-      init_structure3();
-      init_compiler();
-      init_builder();
-      init_type_helpers();
-      (function(ScriptImpl2) {
-        ScriptImpl2.Info = {
-          "mol-script": "Mol-Script",
-          "pymol": "PyMOL",
-          "vmd": "VMD",
-          "jmol": "Jmol"
-        };
-        function is4(x) {
-          return !!x && typeof x.expression === "string" && !!x.language;
-        }
-        ScriptImpl2.is = is4;
-        function areEqual4(a5, b5) {
-          return a5.language === b5.language && a5.expression === b5.expression;
-        }
-        ScriptImpl2.areEqual = areEqual4;
-        function toExpression2(script) {
-          switch (script.language) {
-            case "mol-script":
-              const parsed = parseMolScript(script.expression);
-              if (parsed.length === 0)
-                throw new Error("No query");
-              return transpileMolScript(parsed[0]);
-            case "pymol":
-            case "jmol":
-            case "vmd":
-              return parse4(script.language, script.expression);
-            default:
-              assertUnreachable(script.language);
-          }
-        }
-        ScriptImpl2.toExpression = toExpression2;
-        function toQuery(script) {
-          const expression = toExpression2(script);
-          return compile(expression);
-        }
-        ScriptImpl2.toQuery = toQuery;
-        function toLoci2(script, structure) {
-          const query2 = toQuery(script);
-          const result2 = query2(new QueryContext(structure));
-          return StructureSelection.toLociWithSourceUnits(result2);
-        }
-        ScriptImpl2.toLoci = toLoci2;
-        function getStructureSelection(expr, structure, options) {
-          const e = typeof expr === "function" ? expr(MolScriptBuilder) : expr;
-          const query2 = compile(e);
-          return query2(new QueryContext(structure, options));
-        }
-        ScriptImpl2.getStructureSelection = getStructureSelection;
-      })(ScriptImpl || (ScriptImpl = {}));
     }
   });
 
@@ -77357,6 +78916,8 @@ void main(void) {
         }
         if (b5.data.model === a5.model)
           return Transformer.UpdateResult.Unchanged;
+        if (!b5.data.model)
+          return Transformer.UpdateResult.Unchanged;
         if (!Model.areHierarchiesEqual(a5.model, b5.data.model))
           return Transformer.UpdateResult.Recreate;
         b5.data = b5.data.remapModel(a5.model);
@@ -77566,9 +79127,9 @@ void main(void) {
     const program = Tokenizer.readLine(tokenizer).trim();
     const comment = Tokenizer.readLine(tokenizer).trim();
     const counts = Tokenizer.readLine(tokenizer);
-    const atomCount2 = +counts.substr(0, 3), bondCount = +counts.substr(3, 3);
+    const atomCount2 = +counts.substr(0, 3), bondCount2 = +counts.substr(3, 3);
     const atoms2 = handleAtoms4(tokenizer, atomCount2);
-    const bonds = handleBonds3(tokenizer, bondCount);
+    const bonds = handleBonds3(tokenizer, bondCount2);
     const result2 = {
       title,
       program,
@@ -77682,10 +79243,11 @@ void main(void) {
   // node_modules/molstar/lib/mol-model-formats/structure/cif-core.js
   function getSpacegroupNameOrNumber2(space_group) {
     const groupNumber = space_group.it_number.value(0);
-    const groupName = space_group["name_h-m_full"].value(0).replace("-", " ");
+    const space_group_name = space_group["name_h-m_full"].isDefined ? space_group["name_h-m_full"] : space_group["name_h-m_alt"];
+    const groupName = space_group_name.value(0).replace("_", " ");
     if (!space_group.it_number.isDefined)
       return groupName;
-    if (!space_group["name_h-m_full"].isDefined)
+    if (!space_group_name.isDefined)
       return groupNumber;
     return groupNumber;
   }
@@ -77728,17 +79290,29 @@ void main(void) {
         const ts = type_symbol.value(i);
         const n = ts.length;
         if (ts[n - 1] === "+") {
+          const c5 = ts.charCodeAt(n - 2);
+          if (n >= 2 && c5 >= 49 && c5 <= 57) {
+            element_symbol[i] = ts.substring(0, n - 2);
+            formal_charge[i] = c5 - 48;
+          } else {
+            element_symbol[i] = ts.substring(0, n - 1);
+            formal_charge[i] = 1;
+          }
+        } else if (n >= 2 && ts[n - 2] === "+") {
           element_symbol[i] = ts.substring(0, n - 2);
-          formal_charge[i] = parseInt(ts[n - 2]);
-        } else if (ts[n - 2] === "+") {
-          element_symbol[i] = ts.substring(0, n - 2);
-          formal_charge[i] = parseInt(ts[n - 1]);
+          formal_charge[i] = ts.charCodeAt(n - 1) - 48;
         } else if (ts[n - 1] === "-") {
+          const c5 = ts.charCodeAt(n - 2);
+          if (n >= 2 && c5 >= 48 && c5 <= 57) {
+            element_symbol[i] = ts.substring(0, n - 2);
+            formal_charge[i] = -(c5 - 48);
+          } else {
+            element_symbol[i] = ts.substring(0, n - 1);
+            formal_charge[i] = -1;
+          }
+        } else if (n >= 2 && ts[n - 2] === "-") {
           element_symbol[i] = ts.substring(0, n - 2);
-          formal_charge[i] = -parseInt(ts[n - 2]);
-        } else if (ts[n - 2] === "-") {
-          element_symbol[i] = ts.substring(0, n - 2);
-          formal_charge[i] = -parseInt(ts[n - 1]);
+          formal_charge[i] = -(ts.charCodeAt(n - 1) - 48);
         } else {
           element_symbol[i] = ts;
           formal_charge[i] = 0;
@@ -77790,8 +79364,8 @@ void main(void) {
     if (models.frameCount > 0) {
       const first4 = models.representative;
       ModelSymmetry.Provider.set(first4, symmetry);
-      const bondCount = db.geom_bond._rowCount;
-      if (bondCount > 0) {
+      const bondCount2 = db.geom_bond._rowCount;
+      if (bondCount2 > 0) {
         const labelIndexMap = {};
         const { label: label3 } = db.atom_site;
         for (let i = 0, il = label3.rowCount; i < il; ++i) {
@@ -77806,7 +79380,7 @@ void main(void) {
         const included = /* @__PURE__ */ new Set();
         let j = 0;
         const { atom_site_label_1, atom_site_label_2, valence, distance } = db.geom_bond;
-        for (let i = 0; i < bondCount; ++i) {
+        for (let i = 0; i < bondCount2; ++i) {
           const iA = labelIndexMap[atom_site_label_1.value(i)];
           const iB = labelIndexMap[atom_site_label_2.value(i)];
           const id = iA < iB ? cantorPairing(iA, iB) : cantorPairing(iB, iA);
@@ -79746,17 +81320,17 @@ void main(void) {
   }
   function handleCountsV3(tokenizer) {
     const atomCount2 = TokenBuilder.create(tokenizer.data, 1);
-    const bondCount = TokenBuilder.create(tokenizer.data, 1);
+    const bondCount2 = TokenBuilder.create(tokenizer.data, 1);
     Tokenizer.eatLine(tokenizer);
     skipSingleValue(tokenizer);
     skipSingleValue(tokenizer);
     skipSingleValue(tokenizer);
     addSingleValue(tokenizer, atomCount2);
-    addSingleValue(tokenizer, bondCount);
+    addSingleValue(tokenizer, bondCount2);
     Tokenizer.eatLine(tokenizer);
     return {
       atomCount: TokenColumnProvider(atomCount2)(Column.Schema.int).value(0),
-      bondCount: TokenColumnProvider(bondCount)(Column.Schema.int).value(0)
+      bondCount: TokenColumnProvider(bondCount2)(Column.Schema.int).value(0)
     };
   }
   function handleAtomsV3(tokenizer, atomCount2) {
@@ -79789,11 +81363,11 @@ void main(void) {
       formal_charge: Column.ofConst(0, atomCount2, Column.Schema.int)
     };
   }
-  function handleBondsV3(tokenizer, bondCount) {
-    const atomIdxA = TokenBuilder.create(tokenizer.data, bondCount * 2);
-    const atomIdxB = TokenBuilder.create(tokenizer.data, bondCount * 2);
-    const order = TokenBuilder.create(tokenizer.data, bondCount * 2);
-    for (let i = 0; i < bondCount; ++i) {
+  function handleBondsV3(tokenizer, bondCount2) {
+    const atomIdxA = TokenBuilder.create(tokenizer.data, bondCount2 * 2);
+    const atomIdxB = TokenBuilder.create(tokenizer.data, bondCount2 * 2);
+    const order = TokenBuilder.create(tokenizer.data, bondCount2 * 2);
+    for (let i = 0; i < bondCount2; ++i) {
       Tokenizer.markLine(tokenizer);
       skipSingleValue(tokenizer);
       skipSingleValue(tokenizer);
@@ -79807,7 +81381,7 @@ void main(void) {
     Tokenizer.eatLine(tokenizer);
     Tokenizer.eatLine(tokenizer);
     return {
-      count: bondCount,
+      count: bondCount2,
       atomIdxA: TokenColumnProvider(atomIdxA)(Column.Schema.float),
       atomIdxB: TokenColumnProvider(atomIdxB)(Column.Schema.float),
       order: TokenColumnProvider(order)(Column.Schema.float)
@@ -79879,8 +81453,8 @@ void main(void) {
     const comment = Tokenizer.readLine(tokenizer).trim();
     const countsAndVersion = Tokenizer.readLine(tokenizer);
     const molIsV3 = isV3(countsAndVersion);
-    const { atomCount: atomCount2, bondCount } = molIsV3 ? handleCountsV3(tokenizer) : handleCountsV2(countsAndVersion);
-    if (Number.isNaN(atomCount2) || Number.isNaN(bondCount)) {
+    const { atomCount: atomCount2, bondCount: bondCount2 } = molIsV3 ? handleCountsV3(tokenizer) : handleCountsV2(countsAndVersion);
+    if (Number.isNaN(atomCount2) || Number.isNaN(bondCount2)) {
       while (tokenizer.position < tokenizer.length) {
         const line = Tokenizer.readLine(tokenizer);
         if (line.startsWith(delimiter))
@@ -79893,7 +81467,7 @@ void main(void) {
       charge: Column.ofConst(0, atomCount2, Column.Schema.int)
     };
     const atoms2 = molIsV3 ? handleAtomsV3(tokenizer, atomCount2) : handleAtoms4(tokenizer, atomCount2);
-    const bonds = molIsV3 ? handleBondsV3(tokenizer, bondCount) : handleBonds3(tokenizer, bondCount);
+    const bonds = molIsV3 ? handleBondsV3(tokenizer, bondCount2) : handleBonds3(tokenizer, bondCount2);
     const properties4 = molIsV3 ? { formalCharges: nullFormalCharges } : handlePropertiesBlock(tokenizer);
     const dataItems = handleDataItems(tokenizer);
     return {
@@ -81016,23 +82590,23 @@ void main(void) {
       const format = PrmtopFormat.fromPrmtop(prmtop);
       const basic = getBasic3(prmtop);
       const { pointers: { NBONH, NBONA }, bondsIncHydrogen, bondsWithoutHydrogen } = prmtop;
-      const bondCount = NBONH + NBONA;
+      const bondCount2 = NBONH + NBONA;
       const bonds = {
         indexA: Column.ofLambda({
           value: (row) => {
             return row < NBONH ? bondsIncHydrogen.value(row * 3) / 3 : bondsWithoutHydrogen.value((row - NBONH) * 3) / 3;
           },
-          rowCount: bondCount,
+          rowCount: bondCount2,
           schema: Column.Schema.int
         }),
         indexB: Column.ofLambda({
           value: (row) => {
             return row < NBONH ? bondsIncHydrogen.value(row * 3 + 1) / 3 : bondsWithoutHydrogen.value((row - NBONH) * 3 + 1) / 3;
           },
-          rowCount: bondCount,
+          rowCount: bondCount2,
           schema: Column.Schema.int
         }),
-        order: Column.ofConst(1, bondCount, Column.Schema.int)
+        order: Column.ofConst(1, bondCount2, Column.Schema.int)
       };
       return Topology.create(prmtop.title.join(" ") || "PRMTOP", basic, bonds, format);
     });
@@ -81423,9 +82997,9 @@ void main(void) {
   var CoordinatesFromDcd, CoordinatesFromXtc, CoordinatesFromTrr, CoordinatesFromNctraj, CoordinatesFromLammpstraj, TopologyFromPsf, TopologyFromPrmtop, TopologyFromTop, TrajectoryFromModelAndCoordinates, TrajectoryFromBlob, TrajectoryFromMmCif, TrajectoryFromPDB, TrajectoryFromGRO, TrajectoryFromXYZ, TrajectoryFromLammpsData, TrajectoryFromLammpsTrajData, TrajectoryFromMOL, TrajectoryFromSDF, TrajectoryFromMOL2, TrajectoryFromCube, TrajectoryFromCifCore, plus1, minus1, ModelFromTrajectory, StructureFromTrajectory, StructureFromModel, TransformStructureConformation, StructureInstances, ModelWithCoordinates, StructureSelectionFromExpression, MultiStructureSelectionFromExpression, MultiStructureSelectionFromBundle, StructureSelectionFromScript, StructureSelectionFromBundle, StructureComplexElementTypes, StructureComplexElementTypeTuples, StructureComplexElement, StructureComponent, CustomModelProperties, CustomStructureProperties, ShapeFromPly;
   var init_model3 = __esm({
     "node_modules/molstar/lib/mol-plugin-state/transforms/model.js"() {
-      init_parser12();
-      init_parser13();
-      init_parser14();
+      init_parser16();
+      init_parser17();
+      init_parser18();
       init_linear_algebra();
       init_ply();
       init_dcd();
@@ -81698,12 +83272,12 @@ void main(void) {
         from: [PluginStateObject.Data.String],
         to: PluginStateObject.Molecule.Trajectory,
         params: {
-          isPdbqt: ParamDefinition.Boolean(false)
+          variant: ParamDefinition.Select("pdb", ParamDefinition.arrayToOptions(["pdb", "pdbqt", "pqr"]))
         }
       })({
         apply({ a: a5, params }) {
           return Task.create("Parse PDB", async (ctx) => {
-            const parsed = await parsePDB(a5.data, a5.label, params.isPdbqt).runInContext(ctx);
+            const parsed = await parsePDB(a5.data, a5.label, params.variant).runInContext(ctx);
             if (parsed.isError)
               throw new Error(parsed.message);
             const models = await trajectoryFromPDB(parsed.result).runInContext(ctx);
@@ -82620,17 +84194,18 @@ void main(void) {
           max: Number.isNaN(header2.AMAX) || calcStats ? arrayMax(values2) : header2.AMAX,
           mean: Number.isNaN(header2.AMEAN) || calcStats ? arrayMean(values2) : header2.AMEAN,
           sigma: Number.isNaN(header2.ARMS) || header2.ARMS === 0 ? arrayRms(values2) : header2.ARMS
-        }
+        },
+        periodicity: Vec3.isInteger(dimensions_frac) ? "xyz" : "none"
       };
       return {
         label: params === null || params === void 0 ? void 0 : params.label,
         entryId: params === null || params === void 0 ? void 0 : params.entryId,
-        periodicity: Vec3.isInteger(dimensions_frac) ? "xyz" : "none",
         grid: volgrid,
         instances: [{ transform: Mat4.identity() }],
         sourceData: Ccp4Format.create(source),
         customProperties: new CustomProperties(),
-        _propertyData: /* @__PURE__ */ Object.create(null)
+        _propertyData: /* @__PURE__ */ Object.create(null),
+        _localPropertyData: /* @__PURE__ */ Object.create(null)
       };
     });
   }
@@ -82641,7 +84216,7 @@ void main(void) {
       init_geometry();
       init_linear_algebra();
       init_misc();
-      init_parser4();
+      init_parser8();
       init_typed_array();
       init_array();
       init_custom_property();
@@ -82677,7 +84252,6 @@ void main(void) {
       return {
         label: params === null || params === void 0 ? void 0 : params.label,
         entryId: params === null || params === void 0 ? void 0 : params.entryId,
-        periodicity: Vec3.isInteger(dimensions_frac) ? "xyz" : "none",
         grid: {
           transform: { kind: "spacegroup", cell, fractionalBox: Box3D.create(origin_frac, Vec3.add(Vec3.zero(), origin_frac, dimensions_frac)) },
           cells: data,
@@ -82686,12 +84260,14 @@ void main(void) {
             max: arrayMax(values2),
             mean: arrayMean(values2),
             sigma: header2.sigma !== void 0 ? header2.sigma : arrayRms(values2)
-          }
+          },
+          periodicity: Vec3.isInteger(dimensions_frac) ? "xyz" : "none"
         },
         instances: [{ transform: Mat4.identity() }],
         sourceData: Dsn6Format.create(source),
         customProperties: new CustomProperties(),
-        _propertyData: /* @__PURE__ */ Object.create(null)
+        _propertyData: /* @__PURE__ */ Object.create(null),
+        _localPropertyData: /* @__PURE__ */ Object.create(null)
       };
     });
   }
@@ -82742,7 +84318,8 @@ void main(void) {
         instances: [{ transform: Mat4.identity() }],
         sourceData: DxFormat.create(source),
         customProperties: new CustomProperties(),
-        _propertyData: /* @__PURE__ */ Object.create(null)
+        _propertyData: /* @__PURE__ */ Object.create(null),
+        _localPropertyData: /* @__PURE__ */ Object.create(null)
       };
     });
   }
@@ -82799,7 +84376,8 @@ void main(void) {
         instances: [{ transform: Mat4.identity() }],
         sourceData: SegcifFormat.create(source),
         customProperties: new CustomProperties(),
-        _propertyData: { ownerId: params === null || params === void 0 ? void 0 : params.ownerId }
+        _propertyData: { ownerId: params === null || params === void 0 ? void 0 : params.ownerId },
+        _localPropertyData: /* @__PURE__ */ Object.create(null)
       };
       Volume.PickingGranularity.set(v2, "object");
       const segments2 = /* @__PURE__ */ new Map();
@@ -82902,6 +84480,7 @@ void main(void) {
   var volume_exports = {};
   __export(volume_exports, {
     AssignColorVolume: () => AssignColorVolume,
+    CustomVolumeProperties: () => CustomVolumeProperties,
     VolumeFromCcp4: () => VolumeFromCcp4,
     VolumeFromCube: () => VolumeFromCube,
     VolumeFromDensityServerCif: () => VolumeFromDensityServerCif,
@@ -82911,7 +84490,24 @@ void main(void) {
     VolumeInstances: () => VolumeInstances,
     VolumeTransform: () => VolumeTransform
   });
-  var VolumeFromCcp4, VolumeFromDsn6, VolumeFromCube, VolumeFromDx, VolumeFromDensityServerCif, VolumeFromSegmentationCif, AssignColorVolume, VolumeTransform, VolumeInstances;
+  async function attachVolumeProps(volume, ctx, taskCtx, params) {
+    const propertyCtx = { runtime: taskCtx, assetManager: ctx.managers.asset, errorContext: ctx.errorContext };
+    const { autoAttach, properties: properties4 } = params;
+    for (const name of Object.keys(properties4)) {
+      const property2 = ctx.customVolumeProperties.get(name);
+      const props = properties4[name];
+      if (autoAttach.includes(name) || property2.isHidden) {
+        try {
+          await property2.attach(propertyCtx, volume, props, true);
+        } catch (e) {
+          ctx.log.warn(`Error attaching volume prop '${name}': ${e}`);
+        }
+      } else {
+        property2.set(volume, props);
+      }
+    }
+  }
+  var VolumeFromCcp4, VolumeFromDsn6, VolumeFromCube, VolumeFromDx, VolumeFromDensityServerCif, VolumeFromSegmentationCif, AssignColorVolume, VolumeTransform, VolumeInstances, CustomVolumeProperties;
   var init_volume3 = __esm({
     "node_modules/molstar/lib/mol-plugin-state/transforms/volume.js"() {
       init_cif2();
@@ -83116,7 +84712,8 @@ void main(void) {
             const colorVolume = dependencies[params.ref].data;
             const volume = {
               ...a5.data,
-              colorVolume
+              colorVolume,
+              _localPropertyData: /* @__PURE__ */ Object.create(null)
             };
             const props = { label: a5.label, description: "Volume + Colors" };
             return new PluginStateObject.Volume.Data(volume, props);
@@ -83148,7 +84745,8 @@ void main(void) {
             grid: {
               ...a5.data.grid,
               transform: gridTransform
-            }
+            },
+            _localPropertyData: /* @__PURE__ */ Object.create(null)
           }, {
             label: a5.label,
             description: `${a5.description} [Transformed]`
@@ -83162,25 +84760,85 @@ void main(void) {
         from: PluginStateObject.Volume.Data,
         to: PluginStateObject.Volume.Data,
         params: {
-          transforms: ParamDefinition.ObjectList({ transform: TransformParam }, () => "Transform")
+          mode: ParamDefinition.Select("transforms", ParamDefinition.arrayToOptions(["transforms", "periodicRange"])),
+          transforms: ParamDefinition.ObjectList({ transform: TransformParam }, () => "Transform", { hideIf: (c5) => c5.mode !== "transforms" }),
+          periodicRange: ParamDefinition.Group({
+            min: ParamDefinition.Vec3(Vec3.create(0, 0, 0), { min: -10, max: 10, step: 1 }, { label: "Min", description: "Inclusive lower bound of the translation range (x, y, z)" }),
+            max: ParamDefinition.Vec3(Vec3.create(1, 1, 1), { min: -10, max: 10, step: 1 }, { label: "Max", description: "Exclusive upper bound of the translation range (x, y, z)" })
+          }, { hideIf: (c5) => c5.mode !== "periodicRange", isFlat: true })
         }
       })({
         canAutoUpdate() {
           return true;
         },
         apply({ a: a5, params }) {
-          const center = params.transforms.some((t2) => transformParamsNeedCentroid(t2.transform)) ? Grid.getBoundingSphere(a5.data.grid).center : Vec3.unit;
-          const instances = params.transforms.map((t2) => ({ transform: getTransformFromParams(t2.transform, center) }));
+          let instances = [];
+          if (params.mode === "transforms") {
+            const center = params.transforms.some((t2) => transformParamsNeedCentroid(t2.transform)) ? Grid.getBoundingSphere(a5.data.grid).center : Vec3.unit;
+            instances = params.transforms.map((t2) => ({ transform: getTransformFromParams(t2.transform, center) }));
+          } else if (params.mode === "periodicRange" && Volume.isPeriodic(a5.data)) {
+            const dims = a5.data.grid.cells.space.dimensions;
+            const gridToCartn = Grid.getGridToCartesianTransform(a5.data.grid);
+            const { min: min5, max: max5 } = params.periodicRange;
+            const [minA, minB, minC] = min5;
+            const [maxA, maxB, maxC] = max5;
+            const t2 = Vec3();
+            for (let ia = minA; ia < maxA; ia++) {
+              for (let ib = minB; ib < maxB; ib++) {
+                for (let ic = minC; ic < maxC; ic++) {
+                  Vec3.set(t2, dims[0] * ia, dims[1] * ib, dims[2] * ic);
+                  Vec3.transformMat4(t2, t2, gridToCartn);
+                  instances.push({ transform: Mat4.fromTranslation(Mat4(), t2) });
+                }
+              }
+            }
+          }
           if (!instances.length) {
             return a5;
           }
           return new PluginStateObject.Volume.Data({
             ...a5.data,
-            instances
+            instances,
+            _localPropertyData: /* @__PURE__ */ Object.create(null)
           }, {
             label: a5.label,
             description: `${a5.description} [Instanced]`
           });
+        }
+      });
+      CustomVolumeProperties = PluginStateTransform.BuiltIn({
+        name: "custom-volume-properties",
+        display: { name: "Custom Volume Properties" },
+        isDecorator: true,
+        from: PluginStateObject.Volume.Data,
+        to: PluginStateObject.Volume.Data,
+        params: (a5, ctx) => {
+          return ctx.customVolumeProperties.getParams(a5 === null || a5 === void 0 ? void 0 : a5.data);
+        }
+      })({
+        apply({ a: a5, params }, ctx) {
+          return Task.create("Custom Volume Props", async (taskCtx) => {
+            await attachVolumeProps(a5.data, ctx, taskCtx, params);
+            return new PluginStateObject.Volume.Data(a5.data, { label: a5.label, description: a5.description });
+          });
+        },
+        update({ a: a5, b: b5, oldParams, newParams }, ctx) {
+          return Task.create("Custom Volume Props", async (taskCtx) => {
+            b5.data = a5.data;
+            b5.label = a5.label;
+            b5.description = a5.description;
+            for (const name of oldParams.autoAttach) {
+              const property2 = ctx.customVolumeProperties.get(name);
+              if (!property2)
+                continue;
+              a5.data.customProperties.reference(property2.descriptor, false);
+            }
+            await attachVolumeProps(a5.data, ctx, taskCtx, newParams);
+            return Transformer.UpdateResult.Updated;
+          });
+        },
+        dispose({ b: b5 }) {
+          b5 === null || b5 === void 0 ? void 0 : b5.data.customProperties.dispose();
         }
       });
     }
@@ -84948,6 +86606,163 @@ void main(void) {
     }
   });
 
+  // node_modules/molstar/lib/mol-theme/color/residue-charge.js
+  function getResidueChargeColorThemeParams(ctx) {
+    return ParamDefinition.clone(ResidueChargeColorThemeParams);
+  }
+  function getAtomicCompId2(unit2, element) {
+    return unit2.model.atomicHierarchy.atoms.label_comp_id.value(element);
+  }
+  function getCoarseCompId2(unit2, element) {
+    const seqIdBegin = unit2.coarseElements.seq_id_begin.value(element);
+    const seqIdEnd = unit2.coarseElements.seq_id_end.value(element);
+    if (seqIdBegin === seqIdEnd) {
+      const entityKey = unit2.coarseElements.entityKey[element];
+      const seq = unit2.model.sequence.byEntityKey[entityKey].sequence;
+      return seq.compId.value(seqIdBegin - 1);
+    }
+  }
+  function residueChargeColor(colorMap, residueName) {
+    const c5 = colorMap[residueName];
+    return c5 === void 0 ? DefaultResidueChargeColor : c5;
+  }
+  function ResidueChargeColorTheme(ctx, props) {
+    const { saturation, lightness, colors } = props.method.params;
+    const colorMap = getAdjustedColorMap(props.method.params.colors.name === "default" ? ChargedResidueColors : colors.params, saturation, lightness);
+    function color(location) {
+      if (element_exports.Location.is(location)) {
+        if (Unit.isAtomic(location.unit)) {
+          const compId2 = getAtomicCompId2(location.unit, location.element);
+          return residueChargeColor(colorMap, compId2);
+        } else {
+          const compId2 = getCoarseCompId2(location.unit, location.element);
+          if (compId2)
+            return residueChargeColor(colorMap, compId2);
+        }
+      } else if (Bond.isLocation(location)) {
+        if (Unit.isAtomic(location.aUnit)) {
+          const compId2 = getAtomicCompId2(location.aUnit, location.aUnit.elements[location.aIndex]);
+          return residueChargeColor(colorMap, compId2);
+        } else {
+          const compId2 = getCoarseCompId2(location.aUnit, location.aUnit.elements[location.aIndex]);
+          if (compId2)
+            return residueChargeColor(colorMap, compId2);
+        }
+      }
+      return DefaultResidueChargeColor;
+    }
+    return {
+      factory: ResidueChargeColorTheme,
+      granularity: "group",
+      preferSmoothing: true,
+      color,
+      props,
+      description: Description20,
+      legend: TableLegend(Object.keys(colorMap).map((name) => {
+        return [name, colorMap[name]];
+      }).concat([["Unknown", DefaultResidueChargeColor]]))
+    };
+  }
+  var ChargedResidueColors, DefaultResidueChargeColor, Description20, ResidueChargeColorThemeParams, ResidueChargeColorThemeProvider;
+  var init_residue_charge = __esm({
+    "node_modules/molstar/lib/mol-theme/color/residue-charge.js"() {
+      init_color2();
+      init_structure3();
+      init_param_definition();
+      init_legend();
+      init_color();
+      init_params();
+      init_categories();
+      ChargedResidueColors = ColorMap({
+        // standard amino acids (charged)
+        "ARG": 255,
+        "ASP": 16711680,
+        "GLU": 16711680,
+        "HIS": 3392505,
+        "LYS": 255,
+        // standard amino acids (uncharged)
+        "ALA": 16777215,
+        "ASN": 16777215,
+        "CYS": 16777215,
+        "GLN": 16777215,
+        "GLY": 16777215,
+        "ILE": 16777215,
+        "LEU": 16777215,
+        "MET": 16777215,
+        "PHE": 16777215,
+        "PRO": 16777215,
+        "SER": 16777215,
+        "THR": 16777215,
+        "TRP": 16777215,
+        "TYR": 16777215,
+        "VAL": 16777215,
+        // common from CCD
+        "MSE": 16777215,
+        "SEP": 16777215,
+        "TPO": 16777215,
+        "PTR": 16777215,
+        "PCA": 16777215,
+        "HYP": 16777215,
+        // charmm ff
+        "HSD": 16777215,
+        "HSE": 16777215,
+        "HSP": 255,
+        "LSN": 16777215,
+        "ASPP": 16777215,
+        "GLUP": 16777215,
+        // amber ff
+        "HID": 16777215,
+        "HIE": 16777215,
+        "HIP": 255,
+        "LYN": 16777215,
+        "ASH": 16777215,
+        "GLH": 16777215,
+        // rna bases
+        "A": 16777215,
+        "G": 16777215,
+        "I": 16777215,
+        "C": 16777215,
+        "T": 16777215,
+        "U": 16777215,
+        // dna bases
+        "DA": 16777215,
+        "DG": 16777215,
+        "DI": 16777215,
+        "DC": 16777215,
+        "DT": 16777215,
+        "DU": 16777215,
+        // peptide bases
+        "APN": 16777215,
+        "GPN": 16777215,
+        "CPN": 16777215,
+        "TPN": 16777215
+      });
+      DefaultResidueChargeColor = Color(16711935);
+      Description20 = "Assigns a color to every residue based on its charge state.";
+      ResidueChargeColorThemeParams = {
+        method: ParamDefinition.MappedStatic("by-name", {
+          "by-name": ParamDefinition.Group({
+            saturation: ParamDefinition.Numeric(0, { min: -6, max: 6, step: 0.1 }),
+            lightness: ParamDefinition.Numeric(0, { min: -6, max: 6, step: 0.1 }),
+            colors: ParamDefinition.MappedStatic("default", {
+              "default": ParamDefinition.EmptyGroup(),
+              "custom": ParamDefinition.Group(getColorMapParams(ChargedResidueColors))
+            })
+          }, { isFlat: true })
+        })
+      };
+      ResidueChargeColorThemeProvider = {
+        name: "residue-charge",
+        label: "Residue Charge",
+        category: ColorThemeCategory.Residue,
+        factory: ResidueChargeColorTheme,
+        getParams: getResidueChargeColorThemeParams,
+        defaultValues: ParamDefinition.getDefaultValues(ResidueChargeColorThemeParams),
+        isApplicable: (ctx) => !!ctx.structure
+      };
+    }
+  });
+
   // node_modules/molstar/lib/mol-theme/color/secondary-structure.js
   function getSecondaryStructureColorThemeParams(ctx) {
     return SecondaryStructureColorThemeParams;
@@ -85005,13 +86820,13 @@ void main(void) {
       color,
       props,
       contextHash,
-      description: Description20,
+      description: Description21,
       legend: TableLegend(Object.keys(colorMap).map((name) => {
         return [name, colorMap[name]];
       }).concat([["Other", DefaultSecondaryStructureColor]]))
     };
   }
-  var SecondaryStructureColors, DefaultSecondaryStructureColor, Description20, SecondaryStructureColorThemeParams, SecondaryStructureColorThemeProvider;
+  var SecondaryStructureColors, DefaultSecondaryStructureColor, Description21, SecondaryStructureColorThemeParams, SecondaryStructureColorThemeProvider;
   var init_secondary_structure6 = __esm({
     "node_modules/molstar/lib/mol-theme/color/secondary-structure.js"() {
       init_color2();
@@ -85039,7 +86854,7 @@ void main(void) {
         "carbohydrate": 10921722
       });
       DefaultSecondaryStructureColor = Color(8421504);
-      Description20 = "Assigns a color based on the type of secondary structure and basic molecule type.";
+      Description21 = "Assigns a color based on the type of secondary structure and basic molecule type.";
       SecondaryStructureColorThemeParams = {
         saturation: ParamDefinition.Numeric(-1, { min: -6, max: 6, step: 0.1 }),
         lightness: ParamDefinition.Numeric(0, { min: -6, max: 6, step: 0.1 }),
@@ -85141,11 +86956,11 @@ void main(void) {
       preferSmoothing: true,
       color,
       props,
-      description: Description21,
+      description: Description22,
       legend: scale ? scale.legend : void 0
     };
   }
-  var DefaultColor15, Description21, SequenceIdColorThemeParams, SequenceIdColorThemeProvider;
+  var DefaultColor15, Description22, SequenceIdColorThemeParams, SequenceIdColorThemeProvider;
   var init_sequence_id = __esm({
     "node_modules/molstar/lib/mol-theme/color/sequence-id.js"() {
       init_structure3();
@@ -85153,7 +86968,7 @@ void main(void) {
       init_param_definition();
       init_categories();
       DefaultColor15 = Color(13421772);
-      Description21 = "Gives every polymer residue a color based on its `seq_id` value.";
+      Description22 = "Gives every polymer residue a color based on its `seq_id` value.";
       SequenceIdColorThemeParams = {
         list: ParamDefinition.ColorList("turbo-no-black", { presetKind: "scale" })
       };
@@ -85211,11 +87026,11 @@ void main(void) {
       preferSmoothing: true,
       color,
       props,
-      description: Description22,
+      description: Description23,
       legend: scale ? scale.legend : void 0
     };
   }
-  var DefaultUncertaintyColor, Description22, UncertaintyColorThemeParams, UncertaintyColorThemeProvider;
+  var DefaultUncertaintyColor, Description23, UncertaintyColorThemeParams, UncertaintyColorThemeProvider;
   var init_uncertainty = __esm({
     "node_modules/molstar/lib/mol-theme/color/uncertainty.js"() {
       init_color2();
@@ -85223,7 +87038,7 @@ void main(void) {
       init_param_definition();
       init_categories();
       DefaultUncertaintyColor = Color(16777113);
-      Description22 = `Assigns a color based on the uncertainty or disorder of an element's position, e.g. B-factor or RMSF, depending on the data availability and experimental technique.`;
+      Description23 = `Assigns a color based on the uncertainty or disorder of an element's position, e.g. B-factor or RMSF, depending on the data availability and experimental technique.`;
       UncertaintyColorThemeParams = {
         domain: ParamDefinition.Interval([0, 100]),
         list: ParamDefinition.ColorList("red-white-blue", { presetKind: "scale" })
@@ -85291,11 +87106,11 @@ void main(void) {
       color,
       props,
       contextHash,
-      description: Description23,
+      description: Description24,
       legend
     };
   }
-  var DefaultIllustrativeColor, Description23, IllustrativeColorThemeParams, IllustrativeColorThemeProvider;
+  var DefaultIllustrativeColor, Description24, IllustrativeColorThemeParams, IllustrativeColorThemeProvider;
   var init_illustrative = __esm({
     "node_modules/molstar/lib/mol-theme/color/illustrative.js"() {
       init_color2();
@@ -85312,7 +87127,7 @@ void main(void) {
       init_categories();
       init_trajectory_index();
       DefaultIllustrativeColor = Color(15658734);
-      Description23 = `Assigns an illustrative color that gives every chain a color based on the chosen style but with lighter carbons (inspired by David Goodsell's Molecule of the Month style).`;
+      Description24 = `Assigns an illustrative color that gives every chain a color based on the chosen style but with lighter carbons (inspired by David Goodsell's Molecule of the Month style).`;
       IllustrativeColorThemeParams = {
         style: ParamDefinition.MappedStatic("entity-id", {
           uniform: ParamDefinition.Group(UniformColorThemeParams),
@@ -85346,10 +87161,10 @@ void main(void) {
     const c5 = ResidueHydrophobicity[compId2];
     return c5 === void 0 ? 0 : c5[scaleIndex];
   }
-  function getAtomicCompId2(unit2, element) {
+  function getAtomicCompId3(unit2, element) {
     return unit2.model.atomicHierarchy.atoms.label_comp_id.value(element);
   }
-  function getCoarseCompId2(unit2, element) {
+  function getCoarseCompId3(unit2, element) {
     const seqIdBegin = unit2.coarseElements.seq_id_begin.value(element);
     const seqIdEnd = unit2.coarseElements.seq_id_end.value(element);
     if (seqIdBegin === seqIdEnd) {
@@ -85377,15 +87192,15 @@ void main(void) {
       let compId2;
       if (element_exports.Location.is(location)) {
         if (Unit.isAtomic(location.unit)) {
-          compId2 = getAtomicCompId2(location.unit, location.element);
+          compId2 = getAtomicCompId3(location.unit, location.element);
         } else {
-          compId2 = getCoarseCompId2(location.unit, location.element);
+          compId2 = getCoarseCompId3(location.unit, location.element);
         }
       } else if (Bond.isLocation(location)) {
         if (Unit.isAtomic(location.aUnit)) {
-          compId2 = getAtomicCompId2(location.aUnit, location.aUnit.elements[location.aIndex]);
+          compId2 = getAtomicCompId3(location.aUnit, location.aUnit.elements[location.aIndex]);
         } else {
-          compId2 = getCoarseCompId2(location.aUnit, location.aUnit.elements[location.aIndex]);
+          compId2 = getCoarseCompId3(location.aUnit, location.aUnit.elements[location.aIndex]);
         }
       }
       return scale.color(compId2 ? hydrophobicity(compId2, scaleIndex) : 0);
@@ -85396,11 +87211,11 @@ void main(void) {
       preferSmoothing: true,
       color,
       props,
-      description: Description24,
+      description: Description25,
       legend: scale ? scale.legend : void 0
     };
   }
-  var Description24, HydrophobicityColorThemeParams, scaleIndexMap, HydrophobicityColorThemeProvider;
+  var Description25, HydrophobicityColorThemeParams, scaleIndexMap, HydrophobicityColorThemeProvider;
   var init_hydrophobicity = __esm({
     "node_modules/molstar/lib/mol-theme/color/hydrophobicity.js"() {
       init_color2();
@@ -85408,7 +87223,7 @@ void main(void) {
       init_param_definition();
       init_types();
       init_categories();
-      Description24 = 'Assigns a color to every amino acid according to the "Experimentally determined hydrophobicity scale for proteins at membrane interfaces" by Wimely and White (doi:10.1038/nsb1096-842).';
+      Description25 = 'Assigns a color to every amino acid according to the "Experimentally determined hydrophobicity scale for proteins at membrane interfaces" by Wimely and White (doi:10.1038/nsb1096-842).';
       HydrophobicityColorThemeParams = {
         list: ParamDefinition.ColorList("red-yellow-green", { presetKind: "scale" }),
         scale: ParamDefinition.Select("DGwif", [["DGwif", "DG water-membrane"], ["DGwoct", "DG water-octanol"], ["Oct-IF", "DG difference"]])
@@ -85457,11 +87272,11 @@ void main(void) {
       preferSmoothing: true,
       color,
       props,
-      description: Description25,
+      description: Description26,
       legend: scale ? scale.legend : void 0
     };
   }
-  var DefaultOccupancyColor, Description25, OccupancyColorThemeParams, OccupancyColorThemeProvider;
+  var DefaultOccupancyColor, Description26, OccupancyColorThemeParams, OccupancyColorThemeProvider;
   var init_occupancy = __esm({
     "node_modules/molstar/lib/mol-theme/color/occupancy.js"() {
       init_color2();
@@ -85469,7 +87284,7 @@ void main(void) {
       init_param_definition();
       init_categories();
       DefaultOccupancyColor = Color(13421772);
-      Description25 = `Assigns a color based on the occupancy of an atom.`;
+      Description26 = `Assigns a color based on the occupancy of an atom.`;
       OccupancyColorThemeParams = {
         domain: ParamDefinition.Interval([0, 1]),
         list: ParamDefinition.ColorList("purples", { presetKind: "scale" })
@@ -85566,11 +87381,11 @@ void main(void) {
       granularity: "instance",
       color,
       props,
-      description: Description26,
+      description: Description27,
       legend
     };
   }
-  var DefaultList8, DefaultColor16, Description26, OperatorHklColorThemeParams, hklOffset, OperatorHklColorThemeProvider;
+  var DefaultList8, DefaultColor16, Description27, OperatorHklColorThemeParams, hklOffset, OperatorHklColorThemeProvider;
   var init_operator_hkl = __esm({
     "node_modules/molstar/lib/mol-theme/color/operator-hkl.js"() {
       init_color2();
@@ -85583,7 +87398,7 @@ void main(void) {
       init_categories();
       DefaultList8 = "dark-2";
       DefaultColor16 = Color(13421772);
-      Description26 = `Assigns a color based on the operator HKL value of a transformed chain.`;
+      Description27 = `Assigns a color based on the operator HKL value of a transformed chain.`;
       OperatorHklColorThemeParams = {
         ...getPaletteParams({ type: "colors", colorList: DefaultList8 })
       };
@@ -85629,11 +87444,11 @@ void main(void) {
       preferSmoothing: true,
       color,
       props,
-      description: Description27,
+      description: Description28,
       legend: scale ? scale.legend : void 0
     };
   }
-  var DefaultPartialChargeColor, Description27, PartialChargeColorThemeParams, PartialChargeColorThemeProvider;
+  var DefaultPartialChargeColor, Description28, PartialChargeColorThemeParams, PartialChargeColorThemeProvider;
   var init_partial_charge2 = __esm({
     "node_modules/molstar/lib/mol-theme/color/partial-charge.js"() {
       init_color2();
@@ -85642,7 +87457,7 @@ void main(void) {
       init_partial_charge();
       init_categories();
       DefaultPartialChargeColor = Color(16777113);
-      Description27 = `Assigns a color based on the partial charge of an atom.`;
+      Description28 = `Assigns a color based on the partial charge of an atom.`;
       PartialChargeColorThemeParams = {
         domain: ParamDefinition.Interval([-1, 1]),
         list: ParamDefinition.ColorList("red-white-blue", { presetKind: "scale" })
@@ -85708,11 +87523,11 @@ void main(void) {
       preferSmoothing: true,
       color,
       props,
-      description: Description28,
+      description: Description29,
       legend
     };
   }
-  var DefaultList9, DefaultColor17, Description28, AtomIdColorThemeParams, AtomIdColorThemeProvider;
+  var DefaultList9, DefaultColor17, Description29, AtomIdColorThemeParams, AtomIdColorThemeProvider;
   var init_atom_id = __esm({
     "node_modules/molstar/lib/mol-theme/color/atom-id.js"() {
       init_structure3();
@@ -85722,7 +87537,7 @@ void main(void) {
       init_categories();
       DefaultList9 = "many-distinct";
       DefaultColor17 = Color(16448250);
-      Description28 = "Gives every atom a color based on its `label_atom_id` value.";
+      Description29 = "Gives every atom a color based on its `label_atom_id` value.";
       AtomIdColorThemeParams = {
         ...getPaletteParams({ type: "colors", colorList: DefaultList9 })
       };
@@ -85767,7 +87582,7 @@ void main(void) {
           factory: VolumeValueColorTheme,
           granularity: "direct",
           props,
-          description: Description29,
+          description: Description30,
           palette
         };
       } else {
@@ -85789,7 +87604,7 @@ void main(void) {
           color,
           palette,
           props,
-          description: Description29
+          description: Description30
         };
       }
     } else {
@@ -85798,11 +87613,11 @@ void main(void) {
         granularity: "uniform",
         color: () => props.defaultColor,
         props,
-        description: Description29
+        description: Description30
       };
     }
   }
-  var Description29, VolumeValueColorThemeParams, VolumeValueColorThemeProvider;
+  var Description30, VolumeValueColorThemeParams, VolumeValueColorThemeProvider;
   var init_volume_value = __esm({
     "node_modules/molstar/lib/mol-theme/color/volume-value.js"() {
       init_color3();
@@ -85814,7 +87629,7 @@ void main(void) {
       init_color();
       init_grid2();
       init_location_iterator();
-      Description29 = "Assign color based on the given value of a volume cell.";
+      Description30 = "Assign color based on the given value of a volume cell.";
       VolumeValueColorThemeParams = {
         colorList: ParamDefinition.ColorList({
           kind: "interpolate",
@@ -85874,11 +87689,11 @@ void main(void) {
       granularity: "instance",
       color,
       props,
-      description: Description30,
+      description: Description31,
       legend
     };
   }
-  var DefaultColor18, Description30, VolumeSegmentColorThemeParams, VolumeSegmentColorThemeProvider;
+  var DefaultColor18, Description31, VolumeSegmentColorThemeParams, VolumeSegmentColorThemeProvider;
   var init_volume_segment = __esm({
     "node_modules/molstar/lib/mol-theme/color/volume-segment.js"() {
       init_color2();
@@ -85887,7 +87702,7 @@ void main(void) {
       init_volume();
       init_categories();
       DefaultColor18 = Color(13421772);
-      Description30 = "Gives every volume segment a unique color.";
+      Description31 = "Gives every volume segment a unique color.";
       VolumeSegmentColorThemeParams = {
         ...getPaletteParams({ type: "colors", colorList: "many-distinct" })
       };
@@ -85962,11 +87777,11 @@ void main(void) {
       color,
       palette,
       props,
-      description: Description31
+      description: Description32
       // TODO: figure out how to do legend for this
     };
   }
-  var Description31, ExternalVolumeColorThemeParams, ExternalVolumeColorThemeProvider;
+  var Description32, ExternalVolumeColorThemeParams, ExternalVolumeColorThemeProvider;
   var init_external_volume = __esm({
     "node_modules/molstar/lib/mol-theme/color/external-volume.js"() {
       init_color2();
@@ -85977,13 +87792,15 @@ void main(void) {
       init_linear_algebra();
       init_interpolate();
       init_categories();
-      Description31 = `Assigns a color based on volume value at a given vertex.`;
+      init_selection2();
+      init_objects();
+      Description32 = `Assigns a color based on volume value at a given vertex.`;
       ExternalVolumeColorThemeParams = {
         volume: ParamDefinition.ValueRef((ctx) => {
-          const volumes = ctx.state.data.selectQ((q) => q.root.subtree().filter((c5) => {
+          const volumes = ctx.state.data.select(StateSelection.Generators.rootsOfType(PluginStateObject.Volume.Data)).filter((c5) => {
             var _a;
-            return Volume.is((_a = c5.obj) === null || _a === void 0 ? void 0 : _a.data);
-          }));
+            return (_a = c5.obj) === null || _a === void 0 ? void 0 : _a.data;
+          });
           return volumes.map((v2) => {
             var _a, _b;
             return [v2.transform.ref, (_b = (_a = v2.obj) === null || _a === void 0 ? void 0 : _a.label) !== null && _b !== void 0 ? _b : "<unknown>"];
@@ -86098,11 +87915,11 @@ void main(void) {
       color,
       props,
       contextHash,
-      description: Description32,
+      description: Description33,
       legend
     };
   }
-  var Description32, CartoonColorThemeParams, CartoonColorThemeProvider;
+  var Description33, CartoonColorThemeParams, CartoonColorThemeProvider;
   var init_cartoon = __esm({
     "node_modules/molstar/lib/mol-theme/color/cartoon.js"() {
       init_param_definition();
@@ -86125,7 +87942,7 @@ void main(void) {
       init_occupancy();
       init_sequence_id();
       init_partial_charge2();
-      Description32 = "Uses separate themes for coloring mainchain and sidechain visuals.";
+      Description33 = "Uses separate themes for coloring mainchain and sidechain visuals.";
       CartoonColorThemeParams = {
         mainchain: ParamDefinition.MappedStatic("molecule-type", {
           "uniform": ParamDefinition.Group(UniformColorThemeParams),
@@ -86193,11 +88010,11 @@ void main(void) {
       preferSmoothing: true,
       color,
       props,
-      description: Description33,
+      description: Description34,
       legend: scale ? scale.legend : void 0
     };
   }
-  var DefaultFormalChargeColor, Description33, FormalChargeColorThemeParams, FormalChargeColorThemeProvider;
+  var DefaultFormalChargeColor, Description34, FormalChargeColorThemeParams, FormalChargeColorThemeProvider;
   var init_formal_charge = __esm({
     "node_modules/molstar/lib/mol-theme/color/formal-charge.js"() {
       init_color2();
@@ -86206,7 +88023,7 @@ void main(void) {
       init_categories();
       init_lists();
       DefaultFormalChargeColor = Color(16777113);
-      Description33 = `Assigns a color based on the formal charge of an atom.`;
+      Description34 = `Assigns a color based on the formal charge of an atom.`;
       FormalChargeColorThemeParams = {
         domain: ParamDefinition.Interval([-3, 3]),
         list: ParamDefinition.ColorList({ kind: "set", colors: ColorLists["red-white-blue"].list })
@@ -86308,11 +88125,11 @@ void main(void) {
       color,
       props,
       contextHash,
-      description: Description34,
+      description: Description35,
       legend
     };
   }
-  var Description34, ExternalStructureColorThemeParams, ExternalStructureColorThemeProvider;
+  var Description35, ExternalStructureColorThemeParams, ExternalStructureColorThemeProvider;
   var init_external_structure = __esm({
     "node_modules/molstar/lib/mol-theme/color/external-structure.js"() {
       init_color2();
@@ -86332,7 +88149,7 @@ void main(void) {
       init_lookup3d();
       init_structure_selection_query();
       init_vec3();
-      Description34 = `Assigns a color based on structure property at a given vertex.`;
+      Description35 = `Assigns a color based on structure property at a given vertex.`;
       ExternalStructureColorThemeParams = {
         structure: ParamDefinition.ValueRef((ctx) => {
           const structures = ctx.state.data.select(StateSelection.Generators.rootsOfType(PluginStateObject.Molecule.Structure)).filter((c5) => {
@@ -86405,11 +88222,11 @@ void main(void) {
       granularity: "instance",
       color,
       props,
-      description: Description35,
+      description: Description36,
       legend
     };
   }
-  var DefaultList10, DefaultColor19, Description35, VolumeInstanceColorThemeParams, VolumeInstanceColorThemeProvider;
+  var DefaultList10, DefaultColor19, Description36, VolumeInstanceColorThemeParams, VolumeInstanceColorThemeProvider;
   var init_volume_instance = __esm({
     "node_modules/molstar/lib/mol-theme/color/volume-instance.js"() {
       init_color2();
@@ -86420,7 +88237,7 @@ void main(void) {
       init_volume();
       DefaultList10 = "dark-2";
       DefaultColor19 = Color(13421772);
-      Description35 = "Gives every volume instance a unique color based on the position (index) of the instance in the list of instances of the volume.";
+      Description36 = "Gives every volume instance a unique color based on the position (index) of the instance in the list of instances of the volume.";
       VolumeInstanceColorThemeParams = {
         ...getPaletteParams({ type: "colors", colorList: DefaultList10 })
       };
@@ -86452,6 +88269,7 @@ void main(void) {
       init_polymer_id();
       init_polymer_index();
       init_residue_name();
+      init_residue_charge();
       init_secondary_structure6();
       init_sequence_id();
       init_shape_group2();
@@ -86566,6 +88384,7 @@ void main(void) {
           "partial-charge": PartialChargeColorThemeProvider,
           "polymer-id": PolymerIdColorThemeProvider,
           "polymer-index": PolymerIndexColorThemeProvider,
+          "residue-charge": ResidueChargeColorThemeProvider,
           "residue-name": ResidueNameColorThemeProvider,
           "secondary-structure": SecondaryStructureColorThemeProvider,
           "sequence-id": SequenceIdColorThemeProvider,
@@ -86614,17 +88433,17 @@ void main(void) {
       granularity: "group",
       size: size4,
       props,
-      description: Description36
+      description: Description37
     };
   }
-  var DefaultSize2, Description36, PhysicalSizeThemeParams, PhysicalSizeThemeProvider;
+  var DefaultSize2, Description37, PhysicalSizeThemeParams, PhysicalSizeThemeProvider;
   var init_physical = __esm({
     "node_modules/molstar/lib/mol-theme/size/physical.js"() {
       init_structure3();
       init_atomic();
       init_param_definition();
       DefaultSize2 = 1;
-      Description36 = "Assigns a physical size, i.e. vdW radius for atoms or given radius for coarse spheres.";
+      Description37 = "Assigns a physical size, i.e. vdW radius for atoms or given radius for coarse spheres.";
       PhysicalSizeThemeParams = {
         scale: ParamDefinition.Numeric(1, { min: 0.1, max: 5, step: 0.1 })
       };
@@ -86668,15 +88487,15 @@ void main(void) {
       granularity: "group",
       size: size4,
       props,
-      description: Description37
+      description: Description38
     };
   }
-  var Description37, UncertaintySizeThemeParams, UncertaintySizeThemeProvider;
+  var Description38, UncertaintySizeThemeParams, UncertaintySizeThemeProvider;
   var init_uncertainty2 = __esm({
     "node_modules/molstar/lib/mol-theme/size/uncertainty.js"() {
       init_structure3();
       init_param_definition();
-      Description37 = `Assigns a size reflecting the uncertainty or disorder of an element's position, e.g. B-factor or RMSF, depending on the data availability and experimental technique.`;
+      Description38 = `Assigns a size reflecting the uncertainty or disorder of an element's position, e.g. B-factor or RMSF, depending on the data availability and experimental technique.`;
       UncertaintySizeThemeParams = {
         bfactorFactor: ParamDefinition.Numeric(0.1, { min: 0, max: 1, step: 0.01 }),
         rmsfFactor: ParamDefinition.Numeric(0.05, { min: 0, max: 1, step: 0.01 }),
@@ -86699,41 +88518,76 @@ void main(void) {
     return VolumeValueSizeThemeParams;
   }
   function VolumeValueSizeTheme(ctx, props) {
+    var _a;
     if (ctx.volume) {
-      const { data } = ctx.volume.grid.cells;
-      const isLocation = Volume.Cell.isLocation;
-      const size4 = (location) => {
-        if (isLocation(location)) {
-          return Math.abs(data[location.cell]) * props.scale;
-        } else {
-          return 0;
-        }
-      };
-      return {
-        factory: VolumeValueSizeTheme,
-        granularity: "group",
-        size: size4,
-        props,
-        description: Description38
-      };
+      const { min: min5, max: max5 } = ctx.volume.grid.stats;
+      const domain = props.domain.name === "custom" ? props.domain.params : [min5, max5];
+      const scaleFactor = props.transform === "cubic" ? props.scale ** 3 : props.transform === "quadratic" ? props.scale ** 2 : props.scale;
+      if ((_a = ctx.locationKinds) === null || _a === void 0 ? void 0 : _a.includes("cell-location")) {
+        const { data } = ctx.volume.grid.cells;
+        const isLocation = Volume.Cell.isLocation;
+        const size4 = (location) => {
+          if (isLocation(location)) {
+            const v2 = clamp(Math.abs(data[location.cell]), domain[0], domain[1]);
+            return v2 * scaleFactor;
+          } else {
+            return 0;
+          }
+        };
+        return {
+          factory: VolumeValueSizeTheme,
+          granularity: "group",
+          size: size4,
+          props,
+          description: Description39
+        };
+      } else {
+        const getTrilinearlyInterpolated2 = Grid.makeGetTrilinearlyInterpolated(ctx.volume.grid, "none");
+        const size4 = (location) => {
+          if (isPositionLocation(location)) {
+            const value = getTrilinearlyInterpolated2(location.position);
+            if (Number.isNaN(value))
+              return 0;
+            const v2 = clamp(Math.abs(value), domain[0], domain[1]);
+            return v2 * scaleFactor;
+          } else {
+            return 0;
+          }
+        };
+        return {
+          factory: VolumeValueSizeTheme,
+          granularity: "vertex",
+          size: size4,
+          props,
+          description: Description39
+        };
+      }
     } else {
       return {
         factory: VolumeValueSizeTheme,
         granularity: "uniform",
         size: () => props.scale,
         props,
-        description: Description38
+        description: Description39
       };
     }
   }
-  var Description38, VolumeValueSizeThemeParams, VolumeValueSizeThemeProvider;
+  var Description39, VolumeValueSizeThemeParams, VolumeValueSizeThemeProvider;
   var init_volume_value2 = __esm({
     "node_modules/molstar/lib/mol-theme/size/volume-value.js"() {
       init_param_definition();
       init_volume();
-      Description38 = "Assign size based on the given value of a volume cell. Negative values are made positive.";
+      init_location_iterator();
+      init_grid2();
+      init_interpolate();
+      Description39 = "Assign size based on the given value of a volume cell.";
       VolumeValueSizeThemeParams = {
-        scale: ParamDefinition.Numeric(1, { min: 0.1, max: 5, step: 0.1 })
+        scale: ParamDefinition.Numeric(1, { min: 0.01, max: 10, step: 0.01 }),
+        transform: ParamDefinition.Select("linear", [["linear", "Linear"], ["quadratic", "Quadratic"], ["cubic", "Cubic"]], { description: "Linear: value * scale, Quadratic: value * scale^2, Cubic: value * scale^3" }),
+        domain: ParamDefinition.MappedStatic("auto", {
+          custom: ParamDefinition.Interval([0, 1], { step: 1e-3, min: 0 }),
+          auto: ParamDefinition.Group({})
+        })
       };
       VolumeValueSizeThemeProvider = {
         name: "volume-value",
@@ -87859,6 +89713,7 @@ void main(void) {
             updateMatrix: false,
             updateColor: false,
             updateSize: false,
+            updateLocation: false,
             createGeometry: false,
             createNew: false,
             info: {}
@@ -87870,6 +89725,7 @@ void main(void) {
           state.updateMatrix = false;
           state.updateColor = false;
           state.updateSize = false;
+          state.updateLocation = false;
           state.createGeometry = false;
           state.createNew = false;
         }
@@ -88014,6 +89870,7 @@ void main(void) {
       init_location_iterator();
       init_interval2();
       init_ordered_set2();
+      init_mat4();
       v3set3 = Vec3.set;
       v3normalize = Vec3.normalize;
       v3sub = Vec3.sub;
@@ -88024,8 +89881,9 @@ void main(void) {
   });
 
   // node_modules/molstar/lib/mol-geo/geometry/mesh/color-smoothing.js
-  function calcMeshColorSmoothing(input, resolution, stride, webgl, texture) {
+  function calcMeshColorSmoothing(input, options, webgl, texture) {
     const { colorType, vertexCount, groupCount, positionBuffer, instanceBuffer, transformBuffer, groupBuffer, itemSize } = input;
+    const { resolution, stride } = options;
     const isInstanceType = colorType.endsWith("Instance");
     const box2 = Box3D.fromSphere3D(Box3D(), isInstanceType ? input.boundingSphere : input.invariantBoundingSphere);
     const pad = 1 + resolution;
@@ -88054,7 +89912,7 @@ void main(void) {
     const [dimX, dimY, dimZ] = gridDim;
     const v2 = Vec3();
     for (let i = 0; i < instanceCount; ++i) {
-      const instanceIndex = webgl ? instanceBuffer[i] : i;
+      const instanceIndex = webgl && isInstanceType ? instanceBuffer[i] : i;
       for (let j = 0; j < vertexCount; j += stride) {
         Vec3.fromArray(v2, positionBuffer, j * 3);
         if (isInstanceType)
@@ -88192,7 +90050,7 @@ void main(void) {
   function isSupportedOverpaintType(x) {
     return x === "groupInstance";
   }
-  function applyMeshOverpaintSmoothing(values2, resolution, stride, webgl, colorTexture) {
+  function applyMeshOverpaintSmoothing(values2, options, webgl, colorTexture) {
     if (!isSupportedOverpaintType(values2.dOverpaintType.ref.value))
       return;
     const smoothingData = calcMeshColorSmoothing({
@@ -88208,7 +90066,7 @@ void main(void) {
       boundingSphere: values2.boundingSphere.ref.value,
       invariantBoundingSphere: values2.invariantBoundingSphere.ref.value,
       itemSize: 4
-    }, resolution, stride, webgl, colorTexture);
+    }, options, webgl, colorTexture);
     if (smoothingData.kind === "volume") {
       ValueCell.updateIfChanged(values2.dOverpaintType, smoothingData.type);
       ValueCell.update(values2.tOverpaintGrid, smoothingData.texture);
@@ -88224,7 +90082,7 @@ void main(void) {
   function isSupportedTransparencyType(x) {
     return x === "groupInstance";
   }
-  function applyMeshTransparencySmoothing(values2, resolution, stride, webgl, colorTexture) {
+  function applyMeshTransparencySmoothing(values2, options, webgl, colorTexture) {
     if (!isSupportedTransparencyType(values2.dTransparencyType.ref.value))
       return;
     const smoothingData = calcMeshColorSmoothing({
@@ -88240,7 +90098,7 @@ void main(void) {
       boundingSphere: values2.boundingSphere.ref.value,
       invariantBoundingSphere: values2.invariantBoundingSphere.ref.value,
       itemSize: 1
-    }, resolution, stride, webgl, colorTexture);
+    }, options, webgl, colorTexture);
     if (smoothingData.kind === "volume") {
       ValueCell.updateIfChanged(values2.dTransparencyType, smoothingData.type);
       ValueCell.update(values2.tTransparencyGrid, smoothingData.texture);
@@ -88256,7 +90114,7 @@ void main(void) {
   function isSupportedEmissiveType(x) {
     return x === "groupInstance";
   }
-  function applyMeshEmissiveSmoothing(values2, resolution, stride, webgl, colorTexture) {
+  function applyMeshEmissiveSmoothing(values2, options, webgl, colorTexture) {
     if (!isSupportedEmissiveType(values2.dEmissiveType.ref.value))
       return;
     const smoothingData = calcMeshColorSmoothing({
@@ -88272,7 +90130,7 @@ void main(void) {
       boundingSphere: values2.boundingSphere.ref.value,
       invariantBoundingSphere: values2.invariantBoundingSphere.ref.value,
       itemSize: 1
-    }, resolution, stride, webgl, colorTexture);
+    }, options, webgl, colorTexture);
     if (smoothingData.kind === "volume") {
       ValueCell.updateIfChanged(values2.dEmissiveType, smoothingData.type);
       ValueCell.update(values2.tEmissiveGrid, smoothingData.texture);
@@ -88288,7 +90146,7 @@ void main(void) {
   function isSupportedSubstanceType(x) {
     return x === "groupInstance";
   }
-  function applyMeshSubstanceSmoothing(values2, resolution, stride, webgl, colorTexture) {
+  function applyMeshSubstanceSmoothing(values2, options, webgl, colorTexture) {
     if (!isSupportedSubstanceType(values2.dSubstanceType.ref.value))
       return;
     const smoothingData = calcMeshColorSmoothing({
@@ -88304,7 +90162,7 @@ void main(void) {
       boundingSphere: values2.boundingSphere.ref.value,
       invariantBoundingSphere: values2.invariantBoundingSphere.ref.value,
       itemSize: 4
-    }, resolution, stride, webgl, colorTexture);
+    }, options, webgl, colorTexture);
     if (smoothingData.kind === "volume") {
       ValueCell.updateIfChanged(values2.dSubstanceType, smoothingData.type);
       ValueCell.update(values2.tSubstanceGrid, smoothingData.texture);
@@ -88566,17 +90424,23 @@ void main() {
     }
     return { texDimX, texDimY, texRows, texCols, powerOfTwoSize: texDimY < powerOfTwoSize ? powerOfTwoSize : powerOfTwoSize * 2 };
   }
-  function calcTextureMeshColorSmoothing(input, resolution, stride, webgl, texture) {
+  function calcTextureMeshColorSmoothing(input, options, webgl, texture) {
     const { drawBuffers } = webgl.extensions;
     if (!drawBuffers)
       throw new Error("need WebGL draw buffers");
     if (isTimingMode)
       webgl.timer.mark("calcTextureMeshColorSmoothing");
     const { gl, resources, state, extensions: { colorBufferHalfFloat, textureHalfFloat } } = webgl;
+    const { resolution, stride } = options;
     const isInstanceType = input.colorType.endsWith("Instance");
     const box2 = Box3D.fromSphere3D(Box3D(), isInstanceType ? input.boundingSphere : input.invariantBoundingSphere);
     const pad = 1 + resolution;
     const expandedBox = Box3D.expand(Box3D(), box2, Vec3.create(pad, pad, pad));
+    if (!isInstanceType) {
+      input.instanceCount = 1;
+      input.instanceBuffer = new Float32Array([0]);
+      input.transformBuffer = new Float32Array(Mat4.id);
+    }
     const scaleFactor = 1 / resolution;
     const scaledBox = Box3D.scale(Box3D(), expandedBox, scaleFactor);
     const gridDim = Box3D.size(Vec3(), scaledBox);
@@ -88673,10 +90537,10 @@ void main() {
   function isSupportedOverpaintType2(x) {
     return x === "groupInstance";
   }
-  function applyTextureMeshOverpaintSmoothing(values2, resolution, stride, webgl, colorTexture) {
+  function applyTextureMeshOverpaintSmoothing(values2, options, webgl, colorTexture) {
     if (!isSupportedOverpaintType2(values2.dOverpaintType.ref.value))
       return;
-    stride *= 3;
+    options = { ...options, stride: options.stride * 3 };
     if (!webgl.namedTextures[ColorSmoothingRgbaName]) {
       webgl.namedTextures[ColorSmoothingRgbaName] = webgl.resources.texture("image-uint8", "rgba", "ubyte", "nearest");
     }
@@ -88694,7 +90558,7 @@ void main() {
       colorType: values2.dOverpaintType.ref.value,
       boundingSphere: values2.boundingSphere.ref.value,
       invariantBoundingSphere: values2.invariantBoundingSphere.ref.value
-    }, resolution, stride, webgl, colorTexture);
+    }, options, webgl, colorTexture);
     ValueCell.updateIfChanged(values2.dOverpaintType, smoothingData.type);
     ValueCell.update(values2.tOverpaintGrid, smoothingData.texture);
     ValueCell.update(values2.uOverpaintTexDim, smoothingData.gridTexDim);
@@ -88704,10 +90568,10 @@ void main() {
   function isSupportedTransparencyType2(x) {
     return x === "groupInstance";
   }
-  function applyTextureMeshTransparencySmoothing(values2, resolution, stride, webgl, colorTexture) {
+  function applyTextureMeshTransparencySmoothing(values2, options, webgl, colorTexture) {
     if (!isSupportedTransparencyType2(values2.dTransparencyType.ref.value))
       return;
-    stride *= 3;
+    options = { ...options, stride: options.stride * 3 };
     if (!webgl.namedTextures[ColorSmoothingAlphaName]) {
       webgl.namedTextures[ColorSmoothingAlphaName] = webgl.resources.texture("image-uint8", "alpha", "ubyte", "nearest");
     }
@@ -88725,7 +90589,7 @@ void main() {
       colorType: values2.dTransparencyType.ref.value,
       boundingSphere: values2.boundingSphere.ref.value,
       invariantBoundingSphere: values2.invariantBoundingSphere.ref.value
-    }, resolution, stride, webgl, colorTexture);
+    }, options, webgl, colorTexture);
     ValueCell.updateIfChanged(values2.dTransparencyType, smoothingData.type);
     ValueCell.update(values2.tTransparencyGrid, smoothingData.texture);
     ValueCell.update(values2.uTransparencyTexDim, smoothingData.gridTexDim);
@@ -88735,10 +90599,10 @@ void main() {
   function isSupportedEmissiveType2(x) {
     return x === "groupInstance";
   }
-  function applyTextureMeshEmissiveSmoothing(values2, resolution, stride, webgl, colorTexture) {
+  function applyTextureMeshEmissiveSmoothing(values2, options, webgl, colorTexture) {
     if (!isSupportedEmissiveType2(values2.dEmissiveType.ref.value))
       return;
-    stride *= 3;
+    options = { ...options, stride: options.stride * 3 };
     if (!webgl.namedTextures[ColorSmoothingAlphaName]) {
       webgl.namedTextures[ColorSmoothingAlphaName] = webgl.resources.texture("image-uint8", "alpha", "ubyte", "nearest");
     }
@@ -88756,7 +90620,7 @@ void main() {
       colorType: values2.dEmissiveType.ref.value,
       boundingSphere: values2.boundingSphere.ref.value,
       invariantBoundingSphere: values2.invariantBoundingSphere.ref.value
-    }, resolution, stride, webgl, colorTexture);
+    }, options, webgl, colorTexture);
     ValueCell.updateIfChanged(values2.dEmissiveType, smoothingData.type);
     ValueCell.update(values2.tEmissiveGrid, smoothingData.texture);
     ValueCell.update(values2.uEmissiveTexDim, smoothingData.gridTexDim);
@@ -88766,10 +90630,10 @@ void main() {
   function isSupportedSubstanceType2(x) {
     return x === "groupInstance";
   }
-  function applyTextureMeshSubstanceSmoothing(values2, resolution, stride, webgl, colorTexture) {
+  function applyTextureMeshSubstanceSmoothing(values2, options, webgl, colorTexture) {
     if (!isSupportedSubstanceType2(values2.dSubstanceType.ref.value))
       return;
-    stride *= 3;
+    options = { ...options, stride: options.stride * 3 };
     if (!webgl.namedTextures[ColorSmoothingRgbaName]) {
       webgl.namedTextures[ColorSmoothingRgbaName] = webgl.resources.texture("image-uint8", "rgba", "ubyte", "nearest");
     }
@@ -88787,7 +90651,7 @@ void main() {
       colorType: values2.dSubstanceType.ref.value,
       boundingSphere: values2.boundingSphere.ref.value,
       invariantBoundingSphere: values2.invariantBoundingSphere.ref.value
-    }, resolution, stride, webgl, colorTexture);
+    }, options, webgl, colorTexture);
     ValueCell.updateIfChanged(values2.dSubstanceType, smoothingData.type);
     ValueCell.update(values2.tSubstanceGrid, smoothingData.texture);
     ValueCell.update(values2.uSubstanceTexDim, smoothingData.gridTexDim);
@@ -88982,14 +90846,14 @@ void main() {
               const { resolution, overpaintTexture } = geometry.meta;
               const csp = getColorSmoothingProps(props.smoothColors, true, resolution);
               if (csp) {
-                applyMeshOverpaintSmoothing(renderObject.values, csp.resolution, csp.stride, webgl, overpaintTexture);
+                applyMeshOverpaintSmoothing(renderObject.values, csp, webgl, overpaintTexture);
                 geometry.meta.overpaintTexture = renderObject.values.tOverpaintGrid.ref.value;
               }
             } else if (webgl && geometry.kind === "texture-mesh") {
               const { resolution, overpaintTexture } = geometry.meta;
               const csp = getColorSmoothingProps(props.smoothColors, true, resolution);
               if (csp) {
-                applyTextureMeshOverpaintSmoothing(renderObject.values, csp.resolution, csp.stride, webgl, overpaintTexture);
+                applyTextureMeshOverpaintSmoothing(renderObject.values, csp, webgl, overpaintTexture);
                 geometry.meta.overpaintTexture = renderObject.values.tOverpaintGrid.ref.value;
               }
             }
@@ -89030,14 +90894,14 @@ void main() {
               const { resolution, transparencyTexture } = geometry.meta;
               const csp = getColorSmoothingProps(props.smoothColors, true, resolution);
               if (csp) {
-                applyMeshTransparencySmoothing(renderObject.values, csp.resolution, csp.stride, webgl, transparencyTexture);
+                applyMeshTransparencySmoothing(renderObject.values, csp, webgl, transparencyTexture);
                 geometry.meta.transparencyTexture = renderObject.values.tTransparencyGrid.ref.value;
               }
             } else if (webgl && geometry.kind === "texture-mesh") {
               const { resolution, transparencyTexture } = geometry.meta;
               const csp = getColorSmoothingProps(props.smoothColors, true, resolution);
               if (csp) {
-                applyTextureMeshTransparencySmoothing(renderObject.values, csp.resolution, csp.stride, webgl, transparencyTexture);
+                applyTextureMeshTransparencySmoothing(renderObject.values, csp, webgl, transparencyTexture);
                 geometry.meta.transparencyTexture = renderObject.values.tTransparencyGrid.ref.value;
               }
             }
@@ -89077,14 +90941,14 @@ void main() {
               const { resolution, emissiveTexture } = geometry.meta;
               const csp = getColorSmoothingProps(props.smoothColors, true, resolution);
               if (csp) {
-                applyMeshEmissiveSmoothing(renderObject.values, csp.resolution, csp.stride, webgl, emissiveTexture);
+                applyMeshEmissiveSmoothing(renderObject.values, csp, webgl, emissiveTexture);
                 geometry.meta.emissiveTexture = renderObject.values.tEmissiveGrid.ref.value;
               }
             } else if (webgl && geometry.kind === "texture-mesh") {
               const { resolution, emissiveTexture } = geometry.meta;
               const csp = getColorSmoothingProps(props.smoothColors, true, resolution);
               if (csp) {
-                applyTextureMeshEmissiveSmoothing(renderObject.values, csp.resolution, csp.stride, webgl, emissiveTexture);
+                applyTextureMeshEmissiveSmoothing(renderObject.values, csp, webgl, emissiveTexture);
                 geometry.meta.emissiveTexture = renderObject.values.tEmissiveGrid.ref.value;
               }
             }
@@ -89123,14 +90987,14 @@ void main() {
               const { resolution, substanceTexture } = geometry.meta;
               const csp = getColorSmoothingProps(props.smoothColors, true, resolution);
               if (csp) {
-                applyMeshSubstanceSmoothing(renderObject.values, csp.resolution, csp.stride, webgl, substanceTexture);
+                applyMeshSubstanceSmoothing(renderObject.values, csp, webgl, substanceTexture);
                 geometry.meta.substanceTexture = renderObject.values.tSubstanceGrid.ref.value;
               }
             } else if (webgl && geometry.kind === "texture-mesh") {
               const { resolution, substanceTexture } = geometry.meta;
               const csp = getColorSmoothingProps(props.smoothColors, true, resolution);
               if (csp) {
-                applyTextureMeshSubstanceSmoothing(renderObject.values, csp.resolution, csp.stride, webgl, substanceTexture);
+                applyTextureMeshSubstanceSmoothing(renderObject.values, csp, webgl, substanceTexture);
                 geometry.meta.substanceTexture = renderObject.values.tSubstanceGrid.ref.value;
               }
             }
@@ -90141,7 +92005,7 @@ void main() {
           }
           if (updateState.updateSize) {
             if ("uSize" in _renderObject.values) {
-              createSizes(locationIt, _theme.size, _renderObject.values);
+              createSizes(locationIt, positionIt, _theme.size, _renderObject.values);
             }
           }
           geometryUtils.updateValues(_renderObject.values, newProps);
@@ -90343,7 +92207,7 @@ void main() {
           this.structure = structure;
           this.groupUnitTransforms = [];
           this.unitOffsetMap = IntMap.Mutable();
-          this.groupIndexMap = IntMap.Mutable();
+          this.groupIndexMap = /* @__PURE__ */ new Map();
           this._isIdentity = void 0;
           this.version = 0;
           this.unitTransforms = new Float32Array(structure.units.length * 16);
@@ -90352,7 +92216,7 @@ void main() {
           let groupOffset = 0;
           for (let i = 0, il = structure.unitSymmetryGroups.length; i < il; ++i) {
             const g = structure.unitSymmetryGroups[i];
-            this.groupIndexMap.set(g.hashCode, i);
+            this.groupIndexMap.set(g, i);
             const groupTransforms = this.unitTransforms.subarray(groupOffset, groupOffset + g.units.length * 16);
             this.groupUnitTransforms.push(groupTransforms);
             for (let j = 0, jl = g.units.length; j < jl; ++j) {
@@ -90388,7 +92252,7 @@ void main() {
           return Mat4.fromArray(out, this.unitTransforms, this.unitOffsetMap.get(unit2.id));
         }
         getSymmetryGroupTransforms(group) {
-          return this.groupUnitTransforms[this.groupIndexMap.get(group.hashCode)];
+          return this.groupUnitTransforms[this.groupIndexMap.get(group)];
         }
       };
     }
@@ -90557,7 +92421,7 @@ void main() {
   });
 
   // node_modules/molstar/lib/mol-geo/geometry/text/text-builder.js
-  var quadIndices, caAdd33, caAdd22, caAdd4, TextBuilder;
+  var quadIndices, caAdd33, caAdd23, caAdd4, TextBuilder;
   var init_text_builder = __esm({
     "node_modules/molstar/lib/mol-geo/geometry/text/text-builder.js"() {
       init_param_definition();
@@ -90574,7 +92438,7 @@ void main() {
         2
       ]);
       caAdd33 = ChunkedArray.add3;
-      caAdd22 = ChunkedArray.add2;
+      caAdd23 = ChunkedArray.add2;
       caAdd4 = ChunkedArray.add;
       (function(TextBuilder2) {
         function create3(props = {}, initialCount = 2048, chunkSize = 1024, text) {
@@ -90656,16 +92520,17 @@ void main() {
               }
               const xLeft = (-xShift - margin - 0.1) * scale;
               const xRight = (bWidth - xShift + margin + 0.1) * scale;
-              const yTop = (bHeight - yShift + margin) * scale;
-              const yBottom = (-yShift - margin) * scale;
+              const yMid = 0.5 - yShift - outline * 0.5;
+              const yTop = (yMid + bHeight / 2 + margin) * scale;
+              const yBottom = (yMid - bHeight / 2 - margin) * scale;
               if (background) {
-                caAdd22(mappings, xLeft, yTop);
-                caAdd22(mappings, xLeft, yBottom);
-                caAdd22(mappings, xRight, yTop);
-                caAdd22(mappings, xRight, yBottom);
+                caAdd23(mappings, xLeft, yTop);
+                caAdd23(mappings, xLeft, yBottom);
+                caAdd23(mappings, xRight, yTop);
+                caAdd23(mappings, xRight, yBottom);
                 const offset2 = centers.elementCount;
                 for (let i = 0; i < 4; ++i) {
-                  caAdd22(tcoords, 10, 10);
+                  caAdd23(tcoords, 10, 10);
                   add(x, y, z, depth, group);
                 }
                 caAdd33(indices2, offset2 + quadIndices[0], offset2 + quadIndices[1], offset2 + quadIndices[2]);
@@ -90772,13 +92637,13 @@ void main() {
                   default:
                     assertUnreachable(attachment);
                 }
-                caAdd22(mappings, xTip, yTip);
-                caAdd22(mappings, xBaseA, yBaseA);
-                caAdd22(mappings, xBaseB, yBaseB);
-                caAdd22(mappings, xBaseCenter, yBaseCenter);
+                caAdd23(mappings, xTip, yTip);
+                caAdd23(mappings, xBaseA, yBaseA);
+                caAdd23(mappings, xBaseB, yBaseB);
+                caAdd23(mappings, xBaseCenter, yBaseCenter);
                 const offset2 = centers.elementCount;
                 for (let i = 0; i < 4; ++i) {
-                  caAdd22(tcoords, 10, 10);
+                  caAdd23(tcoords, 10, 10);
                   add(x, y, z, depth, group);
                 }
                 caAdd33(indices2, offset2, offset2 + 1, offset2 + 3);
@@ -90793,16 +92658,16 @@ void main() {
                 const right = (xadvance + c5.nw - xShift) * scale;
                 const top = (c5.nh - yShift) * scale;
                 const bottom = -yShift * scale;
-                caAdd22(mappings, left, top);
-                caAdd22(mappings, left, bottom);
-                caAdd22(mappings, right, top);
-                caAdd22(mappings, right, bottom);
+                caAdd23(mappings, left, top);
+                caAdd23(mappings, left, bottom);
+                caAdd23(mappings, right, top);
+                caAdd23(mappings, right, bottom);
                 const texWidth = fontAtlas.texture.width;
                 const texHeight = fontAtlas.texture.height;
-                caAdd22(tcoords, c5.x / texWidth, c5.y / texHeight);
-                caAdd22(tcoords, c5.x / texWidth, (c5.y + c5.h) / texHeight);
-                caAdd22(tcoords, (c5.x + c5.w) / texWidth, c5.y / texHeight);
-                caAdd22(tcoords, (c5.x + c5.w) / texWidth, (c5.y + c5.h) / texHeight);
+                caAdd23(tcoords, c5.x / texWidth, c5.y / texHeight);
+                caAdd23(tcoords, c5.x / texWidth, (c5.y + c5.h) / texHeight);
+                caAdd23(tcoords, (c5.x + c5.w) / texWidth, c5.y / texHeight);
+                caAdd23(tcoords, (c5.x + c5.w) / texWidth, (c5.y + c5.h) / texHeight);
                 xadvance += c5.nw - 2 * outline;
                 const offset2 = centers.elementCount;
                 for (let i = 0; i < 4; ++i)
@@ -93218,6 +95083,7 @@ void main() {
             if (provider.ensureCustomProperties)
               await provider.ensureCustomProperties.attach(propertyCtx, a5.data);
             const repr = provider.factory({ webgl: (_a = plugin.canvas3d) === null || _a === void 0 ? void 0 : _a.webgl, ...plugin.representation.volume.themes }, provider.getParams);
+            await Theme.ensureDependencies(propertyCtx, plugin.representation.volume.themes, { volume: a5.data }, params);
             repr.setTheme(Theme.create(plugin.representation.volume.themes, { volume: a5.data, locationKinds: provider.locationKinds }, params));
             const props = params.type.params || {};
             await repr.createOrUpdate(props, a5.data).runInContext(ctx);
@@ -93227,18 +95093,32 @@ void main() {
         update({ a: a5, b: b5, oldParams, newParams }, plugin) {
           return Task.create("Volume Representation", async (ctx) => {
             var _a;
-            const oldProvider = plugin.representation.volume.registry.get(oldParams.type.name);
-            if (newParams.type.name !== oldParams.type.name) {
-              (_a = oldProvider.ensureCustomProperties) === null || _a === void 0 ? void 0 : _a.detach(a5.data);
+            if (newParams.type.name !== oldParams.type.name)
               return Transformer.UpdateResult.Recreate;
-            }
+            const provider = plugin.representation.volume.registry.get(newParams.type.name);
+            if ((_a = provider.mustRecreate) === null || _a === void 0 ? void 0 : _a.call(provider, oldParams.type.params, newParams.type.params))
+              return Transformer.UpdateResult.Recreate;
+            const propertyCtx = { runtime: ctx, assetManager: plugin.managers.asset, errorContext: plugin.errorContext };
+            if (provider.ensureCustomProperties)
+              await provider.ensureCustomProperties.attach(propertyCtx, a5.data);
+            Theme.releaseDependencies(plugin.representation.volume.themes, { volume: b5.data.sourceData }, oldParams);
+            await Theme.ensureDependencies(propertyCtx, plugin.representation.volume.themes, { volume: a5.data }, newParams);
+            b5.data.repr.setTheme(Theme.create(plugin.representation.volume.themes, { volume: a5.data, locationKinds: provider.locationKinds }, newParams));
             const props = { ...b5.data.repr.props, ...newParams.type.params };
-            b5.data.repr.setTheme(Theme.create(plugin.representation.volume.themes, { volume: a5.data, locationKinds: oldProvider.locationKinds }, newParams));
             await b5.data.repr.createOrUpdate(props, a5.data).runInContext(ctx);
             b5.data.sourceData = a5.data;
             b5.description = VolumeRepresentation3DHelpers.getDescription(props);
             return Transformer.UpdateResult.Updated;
           });
+        },
+        dispose({ b: b5, params }, plugin) {
+          if (!b5 || !params)
+            return;
+          const volume = b5.data.sourceData;
+          const provider = plugin.representation.volume.registry.get(params.type.name);
+          if (provider.ensureCustomProperties)
+            provider.ensureCustomProperties.detach(volume);
+          Theme.releaseDependencies(plugin.representation.volume.themes, { volume }, params);
         }
       });
       ShapeRepresentation3D = PluginStateTransform.BuiltIn({
@@ -93538,20 +95418,94 @@ void main() {
   var StateTransforms;
   var init_transforms = __esm({
     "node_modules/molstar/lib/mol-plugin-state/transforms.js"() {
-      init_data3();
+      init_data4();
       init_misc3();
       init_model3();
       init_volume3();
       init_representation3();
       init_shape3();
       StateTransforms = {
-        Data: data_exports,
-        Misc: misc_exports,
-        Model: model_exports,
-        Volume: volume_exports,
-        Representation: representation_exports,
-        Shape: shape_exports
+        get Data() {
+          return data_exports;
+        },
+        get Misc() {
+          return misc_exports;
+        },
+        get Model() {
+          return model_exports;
+        },
+        get Volume() {
+          return volume_exports;
+        },
+        get Representation() {
+          return representation_exports;
+        },
+        get Shape() {
+          return shape_exports;
+        }
       };
+    }
+  });
+
+  // node_modules/molstar/lib/mol-plugin-state/helpers/structure-overpaint.js
+  async function setStructureOverpaint(plugin, components, color, lociGetter, types2) {
+    await eachRepr(plugin, components, async (update9, repr, overpaintCell) => {
+      if (types2 && types2.length > 0 && !types2.includes(repr.params.values.type.name))
+        return;
+      const structure = repr.obj.data.sourceData;
+      const loci = await lociGetter(structure.root);
+      if (Loci2.isEmpty(loci) || isEmptyLoci(loci))
+        return;
+      const layer = {
+        bundle: element_exports.Bundle.fromLoci(loci),
+        color: color === -1 ? Color(0) : color,
+        clear: color === -1
+      };
+      if (overpaintCell) {
+        const bundleLayers = [...overpaintCell.params.values.layers, layer];
+        const filtered = getFilteredBundle(bundleLayers, structure);
+        update9.to(overpaintCell).update(Overpaint.toBundle(filtered));
+      } else {
+        const filtered = getFilteredBundle([layer], structure);
+        update9.to(repr.transform.ref).apply(StateTransforms.Representation.OverpaintStructureRepresentation3DFromBundle, Overpaint.toBundle(filtered), { tags: OverpaintManagerTag });
+      }
+    });
+  }
+  async function clearStructureOverpaint(plugin, components, types2) {
+    await eachRepr(plugin, components, async (update9, repr, overpaintCell) => {
+      if (types2 && types2.length > 0 && !types2.includes(repr.params.values.type.name))
+        return;
+      if (overpaintCell) {
+        update9.delete(overpaintCell.transform.ref);
+      }
+    });
+  }
+  async function eachRepr(plugin, components, callback) {
+    const state = plugin.state.data;
+    const update9 = state.build();
+    for (const c5 of components) {
+      for (const r of c5.representations) {
+        const overpaint = state.select(StateSelection.Generators.ofTransformer(StateTransforms.Representation.OverpaintStructureRepresentation3DFromBundle, r.cell.transform.ref).withTag(OverpaintManagerTag));
+        await callback(update9, r.cell, overpaint[0]);
+      }
+    }
+    return update9.commit({ doNotUpdateCurrent: true });
+  }
+  function getFilteredBundle(layers, structure) {
+    const overpaint = Overpaint.ofBundle(layers, structure.root);
+    const merged = Overpaint.merge(overpaint);
+    return Overpaint.filter(merged, structure);
+  }
+  var OverpaintManagerTag;
+  var init_structure_overpaint = __esm({
+    "node_modules/molstar/lib/mol-plugin-state/helpers/structure-overpaint.js"() {
+      init_structure3();
+      init_transforms();
+      init_mol_state();
+      init_overpaint();
+      init_color2();
+      init_loci2();
+      OverpaintManagerTag = "overpaint-controls";
     }
   });
 
@@ -93575,13 +95529,11 @@ void main() {
   var init_cli = __esm({
     "src/cli.ts"() {
       "use strict";
-      init_mol_state();
-      init_objects();
-      init_transforms();
       init_script();
       init_structure3();
       init_color2();
       init_names();
+      init_structure_overpaint();
       HistoryManager = class {
         constructor(maxSize = 200) {
           this.entries = [];
@@ -93763,7 +95715,7 @@ void main() {
             }
           });
         }
-        // ── Mol* API Commands (Phase 2 & 3) ────────────────────────────────────────
+        // ── PHASE 2: Read-only commands ─────────────────────────────────────────────
         registerMolstarCommands() {
           this.registry.register({
             name: "info",
@@ -93825,17 +95777,17 @@ void main() {
           });
           this.registry.register({
             name: "color",
-            description: "Color existing representations cleanly without Z-fighting or crashes.",
-            usage: "color <color_name_or_hex>[, <pymol_expression>]",
+            aliases: ["col"],
+            description: "Color a selection using the built-in overpaint system.",
+            usage: "color <color_name_or_hex> <pymol_expression>",
             async execute(args, plugin) {
-              if (args.length < 2) return { status: "warn", message: "Usage: color <color>, <expression>" };
-              const fullArgs = args.join(" ");
-              const match = fullArgs.match(/^([a-zA-Z0-9#]+),?\s+(.+)$/);
-              if (!match) return { status: "warn", message: "Usage: color <color>, <expression>" };
-              const colorInput = match[1];
-              const expression = match[2];
-              const lowerColor = colorInput.toLowerCase();
+              if (args.length < 2) {
+                return { status: "warn", message: "Usage: color <color> <expression>" };
+              }
+              const colorInput = args[0];
+              const expression = args.slice(1).join(" ").replace(/^,\s*/, "");
               let parsedColor;
+              const lowerColor = colorInput.toLowerCase();
               if (lowerColor in ColorNames) {
                 parsedColor = ColorNames[lowerColor];
               } else {
@@ -93843,58 +95795,91 @@ void main() {
                 if (hexMatch) {
                   parsedColor = Color.fromHexStyle(`#${hexMatch[1]}`);
                 } else {
-                  return { status: "error", message: `Invalid color: "${colorInput}". Use a name (e.g., red) or hex (e.g., #ff0000).` };
+                  return {
+                    status: "error",
+                    message: `Invalid color: "${colorInput}". Use a name (e.g., red) or hex (e.g., #ff0000).`
+                  };
                 }
               }
               const loci = evaluateSelection(plugin, expression);
               if (!loci || element_exports.Loci.isEmpty(loci)) {
-                return { status: "error", message: `No atoms matched selection: "${expression}"` };
+                return { status: "error", message: `No atoms matched: "${expression}"` };
               }
               const structures = plugin.managers.structure.hierarchy.current.structures;
-              if (structures.length === 0) return { status: "error", message: "No structure loaded." };
-              const update9 = plugin.state.data.build();
-              let appliedCount = 0;
-              const structureRef = structures[0].cell.transform.ref;
-              const reprCells = plugin.state.data.select(
-                StateSelection.Generators.byRef(structureRef).subtree().ofType(PluginStateObject.Molecule.Structure.Representation3D)
-              );
-              for (const cell of reprCells) {
-                const reprData = cell.obj?.data;
-                if (!reprData || !reprData.sourceData) continue;
-                const lociInRepr = element_exports.Loci.remap(loci, reprData.sourceData);
-                if (element_exports.Loci.isEmpty(lociInRepr)) continue;
-                const bundle = element_exports.Bundle.fromLoci(lociInRepr);
-                const repRef = cell.transform.ref;
-                let existingOverpaintRef;
-                const children = plugin.state.data.tree.children.get(repRef);
-                if (children) {
-                  for (const childRef of children.values()) {
-                    const childCell = plugin.state.data.cells.get(childRef);
-                    if (childCell && childCell.transform.transformer.id === StateTransforms.Representation.OverpaintStructureRepresentation3DFromBundle.id) {
-                      existingOverpaintRef = childRef;
-                      break;
+              if (structures.length === 0) {
+                return { status: "error", message: "No structure loaded." };
+              }
+              try {
+                const components = [];
+                for (const hierarchyStructure of structures) {
+                  for (const component of hierarchyStructure.components) {
+                    if (component.representations && component.representations.length > 0) {
+                      components.push(component);
                     }
                   }
                 }
-                if (existingOverpaintRef) {
-                  update9.to(existingOverpaintRef).update((old) => {
-                    const layers = old && old.layers ? [...old.layers] : [];
-                    layers.push({ bundle, color: parsedColor, clear: false });
-                    return { layers };
-                  });
-                } else {
-                  update9.to(repRef).apply(
-                    StateTransforms.Representation.OverpaintStructureRepresentation3DFromBundle,
-                    { layers: [{ bundle, color: parsedColor, clear: false }] }
-                  );
+                if (components.length === 0) {
+                  return { status: "warn", message: "No representations found." };
                 }
-                appliedCount++;
+                await setStructureOverpaint(
+                  plugin,
+                  components,
+                  parsedColor,
+                  async (structure) => {
+                    return element_exports.Loci.remap(loci, structure);
+                  }
+                );
+                const atomCount2 = element_exports.Loci.size(loci);
+                return {
+                  status: "ok",
+                  message: `Colored ${atomCount2} atoms as ${colorInput}.`
+                };
+              } catch (err) {
+                console.error("Color command error:", err);
+                return {
+                  status: "error",
+                  message: `Failed to apply color: ${err instanceof Error ? err.message : String(err)}`
+                };
               }
-              if (appliedCount > 0) {
-                await update9.commit();
-                return { status: "ok", message: `Colored "${expression}" as ${colorInput}.` };
-              } else {
-                return { status: "warn", message: "Selection is valid, but no matching representations were found beneath the structure." };
+            }
+          });
+          this.registry.register({
+            name: "clearcolor",
+            aliases: ["clr", "uncolor"],
+            description: "Remove custom colors from a selection.",
+            usage: "clearcolor <pymol_expression>",
+            async execute(args, plugin) {
+              if (args.length === 0) {
+                return { status: "warn", message: "Usage: clearcolor <expression>" };
+              }
+              const expression = args.join(" ");
+              const structures = plugin.managers.structure.hierarchy.current.structures;
+              if (structures.length === 0) {
+                return { status: "error", message: "No structure loaded." };
+              }
+              try {
+                const components = [];
+                for (const hierarchyStructure of structures) {
+                  for (const component of hierarchyStructure.components) {
+                    if (component.representations && component.representations.length > 0) {
+                      components.push(component);
+                    }
+                  }
+                }
+                if (components.length === 0) {
+                  return { status: "warn", message: "No representations found." };
+                }
+                await clearStructureOverpaint(plugin, components);
+                return {
+                  status: "ok",
+                  message: `Cleared all custom colors.`
+                };
+              } catch (err) {
+                console.error("Clearcolor command error:", err);
+                return {
+                  status: "error",
+                  message: `Failed to clear colors: ${err instanceof Error ? err.message : String(err)}`
+                };
               }
             }
           });
