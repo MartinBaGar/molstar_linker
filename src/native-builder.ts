@@ -1,9 +1,9 @@
 // src/native-builder.ts
 
-import { CartoonRepresentationProvider } from 'molstar/lib/mol-repr/structure/representation/cartoon';
-import { CartoonParams } from 'molstar/lib/mol-repr/structure/representation/cartoon';
-// import { PD } from 'molstar/lib/mol-util/param-definition';
-import { StructureRepresentationBuiltInProps } from 'molstar/lib/mol-plugin-state/helpers/structure-representation-params';
+import { StructureSelectionQueries as Q } from 'molstar/lib/mol-plugin-state/helpers/structure-selection-query';
+import { Script } from "molstar/lib/mol-script/script";
+import { StateObjectRef } from "molstar/lib/mol-state";
+import { PluginStateObject } from "molstar/lib/mol-plugin-state/objects";
 import { StructureElement, Structure } from 'molstar/lib/mol-model/structure';
 import type { PluginContext } from 'molstar/lib/mol-plugin/context';
 import { Color } from 'molstar/lib/mol-util/color';
@@ -40,9 +40,6 @@ export const NativeBuilder = {
     format: string,
     settings: ExtensionSettings,
   ): Promise<void> {
-
-    plugin.clear();
-
     const isBinary     = format === 'bcif';
     const parsedFormat = format === 'cif' ? 'mmcif' : format;
 
@@ -63,58 +60,10 @@ export const NativeBuilder = {
     // ------------------------------------------------------------------
     // 1. Apply Mol* built-in preset (e.g., 'auto', 'polymer-and-ligand')
     // ------------------------------------------------------------------
-    const presetName = Object.keys(AppConfig.builtInPresets).find(
-      key => JSON.stringify(AppConfig.builtInPresets[key].settings) === JSON.stringify(settings)
-    ) || 'auto';
-    console.log(presetName)
-
-    // ------------------------------------------------------------------
-    // 2. Override specific components if settings exist
-    // ------------------------------------------------------------------
-    for (const target of AppConfig.targets) {
-      const repType = settings[`${target.id}_rep`] as string | undefined;
-      if (!repType || repType === 'off') continue;
-
-      const component = await plugin.builders.structure.tryCreateComponentStatic(
-        structure,
-        target.selector as any,
-      );
-      if (!component) continue;
-
-      // Remove existing representation (if any)
-      // await plugin.managers.structure.representation.removeAll(component);
-
-
-    await plugin.builders.structure.representation.applyPreset(
-      structure,
-      'ball-and-stick',
-      // presetName,
+    await plugin.builders.structure.hierarchy.applyPreset(
+      trajectory,
+      'default',
     );
-      // Apply custom representation with your settings
-      // await this.applyRepresentation(plugin, component, target.id, settings);
-    }
-
-    // ------------------------------------------------------------------
-    // Global target components (protein, nucleic, ligand, lipid, …)
-    // ------------------------------------------------------------------
-    // for (const target of AppConfig.targets) {
-    //   const repType = settings[`${target.id}_rep`] as string | undefined;
-    //   if (!repType || repType === 'off') continue;
-
-    //   const component = await plugin.builders.structure.tryCreateComponentStatic(
-    //     structure,
-    //     target.selector as any,
-    //   );
-
-    //   if (component) {
-    //     await this.applyRepresentation(plugin, component, target.id, settings);
-    //   }
-    // }
-
-    // await plugin.builders.structure.representation.applyPreset(
-    //     structure,
-    //     'auto',
-    // );
 
     // ------------------------------------------------------------------
     // Hover tooltip provider — registered once per plugin instance.
@@ -164,7 +113,6 @@ export const NativeBuilder = {
           ? this.buildExpertExpression(rule.selector)
           : this.buildSimpleExpression(rule);
 
-        // Stable ID — no Date.now() so re-renders don't bloat the state tree
         const componentId = `custom-rule-${i}`;
 
         const component = await plugin.builders.structure.tryCreateComponentFromExpression(
@@ -342,38 +290,6 @@ export const NativeBuilder = {
   // Apply a global-target representation
   // -------------------------------------------------------------------------
 
-async applyRepresentation(
-    plugin: PluginContext,
-    component: any,
-    targetId: string,
-    settings: ExtensionSettings,
-): Promise<void> {
-    console.log(settings)
-    // const structure = component.obj?.data;
-    // if (!structure) return;
-
-    // // Check if cartoon representation is applicable to this structure
-    // if (!CartoonRepresentationProvider.isApplicable(structure)) {
-    //     console.log(`Cartoon representation not applicable for target ${targetId}`);
-    //     return;
-    // }
-
-    // const sizeFactor = settings[`${targetId}_size`] as number | undefined ?? 1.0;
-
-    // // const customParams = {
-    // //     ...CartoonRepresentationProvider.defaultValues,
-    // //     sizeFactor: PD.Numeric(sizeFactor, { min: 0, max: 10, step: 0.01 }),
-    // // };
-
-    // await plugin.builders.structure.representation.addRepresentation(
-    //     component,
-    //     {
-    //         type: "cartoon",
-    //       typeParams: {sizeFactor: sizeFactor},
-    //         color: settings[`${targetId}_colorVal`] as any || CartoonRepresentationProvider.defaultColorTheme.name,
-    //     },
-    // );
-},
 
   // -------------------------------------------------------------------------
   // Apply a custom-rule representation
